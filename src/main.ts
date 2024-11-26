@@ -1,4 +1,5 @@
 import { Plugin } from "obsidian";
+import { highlightBracket } from "./extension/HightlightBracketMatching";
 
 // Remember to rename these classes and interfaces!
 
@@ -15,6 +16,7 @@ export default class Mikansei extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
+		this.registerEditorExtension([highlightBracket(this)]);
 	}
 
 	onunload() {}
