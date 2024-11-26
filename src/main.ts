@@ -1,5 +1,6 @@
 import { Plugin } from "obsidian";
 import { highlightBracket } from "./extension/HightlightBracketMatching";
+import { enhanceLinkPaste } from "./event/LinkPasteEnhancer";
 
 // Remember to rename these classes and interfaces!
 
@@ -17,6 +18,7 @@ export default class Mikansei extends Plugin {
 	async onload() {
 		await this.loadSettings();
 		this.registerEditorExtension([highlightBracket(this)]);
+		enhanceLinkPaste(this);
 	}
 
 	onunload() {}
