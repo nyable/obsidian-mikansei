@@ -17,7 +17,12 @@ class LinkActionModal extends SuggestModal<LinkAction> {
 
 	renderSuggestion(action: LinkAction, el: HTMLElement) {
 		el.createEl("div", { text: action.label });
-		el.createEl("small", { text: action.value });
+		el.createEl("div", {
+			text: action.value,
+			attr: {
+				style: "font-size: 12px;text-overflow: ellipsis;overflow: hidden;",
+			},
+		});
 	}
 
 	onChooseSuggestion(action: LinkAction, evt: MouseEvent | KeyboardEvent) {}
@@ -66,21 +71,21 @@ export const enhanceLinkPaste = (plugin: Mikansei) => {
 
 						const suggestions = [
 							{
-								label: "作为链接",
+								label: "1. 作为链接",
 								value: `[${lastPath}](${url.toString()})`,
 								callback: (value: string) => {
 									replaceAsValue(editor, url, value);
 								},
 							},
 							{
-								label: "作为文本",
+								label: "2. 作为文本",
 								value: originText,
 								callback: (value: string) => {
 									editor.replaceSelection(value);
 								},
 							},
 							{
-								label: "作为图片",
+								label: "3. 作为图片",
 								value: `![${lastPath}](${url.toString()})`,
 								callback: (value: string) => {
 									replaceAsValue(editor, url, value);
@@ -89,12 +94,9 @@ export const enhanceLinkPaste = (plugin: Mikansei) => {
 						];
 
 						model.getSuggestions = (q: string) => {
-							return suggestions
-								.map((s, index) => {
-									s.label = `${index + 1}. ${s.label}`;
-									return s;
-								})
-								.filter((s) => s.label.includes(q));
+							return suggestions.filter((s) =>
+								s.label.includes(q)
+							);
 						};
 						model.onChooseSuggestion = (
 							suggestion: LinkAction,
