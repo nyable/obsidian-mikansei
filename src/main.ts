@@ -2,8 +2,6 @@ import { Plugin } from "obsidian";
 import { highlightBracket } from "./extension/HightlightBracketMatching";
 import { enhanceLinkPaste } from "./event/LinkPasteEnhancer";
 
-// Remember to rename these classes and interfaces!
-
 interface PluginSettings {
 	mySetting: string;
 }
