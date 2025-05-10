@@ -25,7 +25,7 @@ export const highlightBracket = (plugin: Mikansei) =>
 				);
 
 				plugin.addCommand({
-					id: "cbe-jump-to-bracket",
+					id: "nya-jump-to-bracket",
 					name: "Jump to bracket",
 					icon: "braces",
 					editorCheckCallback(checking, editor, ctx) {
@@ -47,7 +47,7 @@ export const highlightBracket = (plugin: Mikansei) =>
 					},
 				});
 				plugin.addCommand({
-					id: "cbe-select-to-bracket2",
+					id: "nya-select-to-bracket2",
 					name: "Select to bracket",
 					icon: "braces",
 					editorCheckCallback(checking, editor, ctx) {

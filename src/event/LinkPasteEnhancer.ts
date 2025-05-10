@@ -1,6 +1,6 @@
 import { App, Editor, SuggestModal } from "obsidian";
 import type Mikansei from "src/main";
-
+import { getUrlTitle } from "../utils/http-util";
 interface LinkAction {
 	label: string;
 	value: string;
@@ -28,12 +28,33 @@ class LinkActionModal extends SuggestModal<LinkAction> {
 	onChooseSuggestion(action: LinkAction, evt: MouseEvent | KeyboardEvent) {}
 }
 
-function replaceAsValue(editor: Editor, url: URL, value: string) {
-	const lastPath = decodeURI(url.pathname.split("/").pop() || "");
-	editor.replaceSelection(value);
+async function replaceByText(
+	editor: Editor,
+	url: string,
+	text: string,
+	title: string,
+	fetchTitle: boolean,
+	timeout: number
+) {
+	let finalTitle = title;
+	if (fetchTitle) {
+		const webTitle = await getUrlTitle(url, timeout);
+		if (webTitle) {
+			finalTitle = webTitle;
+		}
+	}
+	const titleLength = finalTitle.length;
+	const urlLength = url.length;
+	let finalLink = text;
+
+	if (text.startsWith(`[${title}]`) && title != finalTitle) {
+		finalLink = text.replace(`[${title}]`, `[${finalTitle}]`);
+	}
+
+	editor.replaceSelection(finalLink);
 	const { ch, line } = editor.getCursor();
 
-	const cursorCh = ch - url.toString().length - 3 - lastPath.length;
+	const cursorCh = ch - urlLength - titleLength - 3;
 	editor.setCursor(line, cursorCh);
 	editor.setSelection(
 		{
@@ -42,14 +63,15 @@ function replaceAsValue(editor: Editor, url: URL, value: string) {
 		},
 		{
 			line: line,
-			ch: cursorCh + lastPath.length,
+			ch: cursorCh + titleLength,
 		}
 	);
 }
 
 export const enhanceLinkPaste = (plugin: Mikansei) => {
+	const { fetchTitle, fetchTitleTimeout } = plugin.settings;
 	plugin.registerEvent(
-		plugin.app.workspace.on("editor-paste", (evt, editor) => {
+		plugin.app.workspace.on("editor-paste", async (evt, editor) => {
 			const dataType = "text/plain";
 			const clipData = evt.clipboardData;
 
@@ -64,17 +86,26 @@ export const enhanceLinkPaste = (plugin: Mikansei) => {
 						evt.preventDefault();
 						evt.stopPropagation();
 						const url = new URL(trimText);
-						const lastPath = decodeURI(
+						const urlStr = url.toString();
+						const title = decodeURI(
 							url.pathname.split("/").pop() || ""
 						);
+
 						const model = new LinkActionModal(plugin.app);
 
 						const suggestions = [
 							{
 								label: "1. 作为链接",
-								value: `[${lastPath}](${url.toString()})`,
+								value: `[${title}](${urlStr})`,
 								callback: (value: string) => {
-									replaceAsValue(editor, url, value);
+									replaceByText(
+										editor,
+										urlStr,
+										value,
+										title,
+										fetchTitle,
+										fetchTitleTimeout
+									);
 								},
 							},
 							{
@@ -86,9 +117,16 @@ export const enhanceLinkPaste = (plugin: Mikansei) => {
 							},
 							{
 								label: "3. 作为图片",
-								value: `![${lastPath}](${url.toString()})`,
+								value: `![${title}](${urlStr})`,
 								callback: (value: string) => {
-									replaceAsValue(editor, url, value);
+									replaceByText(
+										editor,
+										urlStr,
+										value,
+										title,
+										fetchTitle,
+										fetchTitleTimeout
+									);
 								},
 							},
 						];
