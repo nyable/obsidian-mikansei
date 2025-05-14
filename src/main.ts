@@ -1,6 +1,7 @@
 import { App, Plugin, PluginSettingTab, Setting } from "obsidian";
 import { highlightBracket } from "./extension/HightlightBracketMatching";
 import { enhanceLinkPaste } from "./event/LinkPasteEnhancer";
+import { codeBlockCrypto } from "./extension/CodeBlockCrypto";
 
 interface PluginSettings {
 	linkPasteEnhancer: boolean;
@@ -24,6 +25,7 @@ export default class Mikansei extends Plugin {
 		if (this.settings.linkPasteEnhancer) {
 			enhanceLinkPaste(this);
 		}
+		codeBlockCrypto(this);
 	}
 
 	onunload() {}
