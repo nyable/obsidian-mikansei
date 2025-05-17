@@ -35,8 +35,6 @@ function arrayBufferToBase64(buffer: ArrayBuffer) {
  * @returns ArrayBuffer
  */
 function base64ToArrayBuffer(base64: string) {
-	console.log("base64ToArrayBuffer", base64);
-
 	const binary_string = window.atob(base64);
 	const bytes = new Uint8Array(binary_string.length);
 	for (let i = 0; i < binary_string.length; i++) {
@@ -148,7 +146,6 @@ export async function encryptAesGcm(
 			timestamp: Date.now(),
 			remark: remark,
 		};
-		console.log("bundle", bundle);
 
 		return bundle;
 	} catch (error) {
@@ -161,10 +158,7 @@ export async function decryptAesGcm(
 	password: string
 ): Promise<AesGcmDecryptResult> {
 	try {
-		console.log("bundleStr", bundleStr);
-
 		const jsonBundle = base64ToString(bundleStr);
-		console.log("jsonBundle", jsonBundle);
 
 		const bundle: AesGcmEncryptResult = JSON.parse(jsonBundle);
 
