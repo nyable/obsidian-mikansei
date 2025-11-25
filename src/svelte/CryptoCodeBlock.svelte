@@ -52,15 +52,14 @@
 	// 解析备注信息
 	let remarkInfo = $derived.by(() => {
 		if (!isEncrypted) {
-			return (
-				props.source.substring(0, 100) +
-				(props.source.length > 100 ? "..." : "")
-			);
+			// 未加密时显示完整内容
+			return props.source;
 		}
 
 		try {
 			const decodedStr = base64ToString(props.source);
 			const data = JSON.parse(decodedStr) as AesGcmDecryptResult;
+			// 备注支持换行，显示完整内容
 			return data?.remark || "（无备注信息）";
 		} catch {
 			return "（解析失败）";
@@ -75,9 +74,10 @@
 	);
 
 	// 处理复制
-	function handleCopy() {
+	async function handleCopy() {
 		if (!isEncrypted) {
-			navigator.clipboard.writeText(props.source);
+			await navigator.clipboard.writeText(props.source);
+			new Notice("✅ 内容已复制到剪贴板", 2000);
 			return;
 		}
 		dialogAction = "copy";
@@ -165,6 +165,7 @@
 
 			if (dialogAction === "copy") {
 				await navigator.clipboard.writeText(result.text);
+				new Notice("✅ 解密内容已复制到剪贴板", 2000);
 			} else if (dialogAction === "preview") {
 				decryptedContent = result.text;
 				decryptedLanguage = result.language || "text";
@@ -362,11 +363,18 @@
 						content: decryptedContent,
 						language: decryptedLanguage,
 					}}
+					style:max-height="{props.plugin.settings
+						.cryptoBlockHeight}px"
 				></div>
 			</div>
 		{:else}
 			<!-- 显示备注信息 -->
-			<div class="remark-text">{remarkInfo}</div>
+			<div
+				class="remark-text"
+				style:max-height="{props.plugin.settings.cryptoBlockHeight}px"
+			>
+				{remarkInfo}
+			</div>
 		{/if}
 	</div>
 
@@ -688,29 +696,31 @@
 		}
 
 		.status-indicator {
+			$color-encrypted: #44cf6e;
+			$color-original: #ff9800;
 			position: absolute;
 			top: 8px;
 			left: 8px;
 			width: 8px;
 			height: 8px;
 			border-radius: 50%;
-			background: var(--color-blue);
+			background: $color-original;
 			box-shadow:
 				0 0 0 2px var(--background-primary),
-				0 0 0 3px rgba(from var(--color-blue) r g b / 0.3);
+				0 0 0 3px rgba(from $color-original r g b / 0.3);
 			z-index: 2;
 			transition: all 0.3s ease;
 
 			&.encrypted {
-				background: var(--color-green);
+				background: $color-encrypted;
 				box-shadow:
 					0 0 0 2px var(--background-primary),
-					0 0 0 3px rgba(from var(--color-green) r g b / 0.3);
+					0 0 0 3px rgba(from $color-encrypted r g b / 0.3);
 			}
 		}
 
 		.content-area {
-			padding: 16px;
+			padding: 20px 20px 4px 20px;
 			min-height: 40px;
 			background: var(--background-primary);
 
@@ -720,6 +730,10 @@
 				font-size: 14px;
 				line-height: 1.6;
 				word-break: break-word;
+				white-space: pre-wrap;
+
+				overflow-y: auto;
+				border: 1px solid var(--background-modifier-border);
 			}
 
 			.decrypted-preview {
@@ -752,7 +766,7 @@
 					line-height: 1.5;
 					white-space: pre-wrap;
 					word-break: break-word;
-					max-height: 400px;
+
 					overflow-y: auto;
 				}
 			}

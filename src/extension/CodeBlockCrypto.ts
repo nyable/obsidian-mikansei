@@ -27,7 +27,7 @@ const activeComponents: Map<
 
 export const codeBlockCrypto = (plugin: Mikansei) => {
 	// 获取自定义的语言名称
-	const langName = plugin.settings.cryptoBlockLanguage || "usagi";
+	const langName = plugin.settings.cryptoBlockLanguage || "nya";
 
 	// 注册代码块
 	plugin.registerMarkdownCodeBlockProcessor(langName, (source, el, ctx) => {
@@ -125,7 +125,7 @@ export const codeBlockCrypto = (plugin: Mikansei) => {
 		}
 
 		// 获取自定义的语言名称
-		const langName = plugin.settings.cryptoBlockLanguage || "usagi";
+		const langName = plugin.settings.cryptoBlockLanguage || "nya";
 		// 构造动态正则表达式，转义特殊字符
 		const escapedLang = langName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 		const codeBlockPattern = new RegExp(`^\\s*\`\`\`\\s*${escapedLang}(\\s.*)?`);
