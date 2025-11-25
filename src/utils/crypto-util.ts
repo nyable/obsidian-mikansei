@@ -5,6 +5,7 @@ export interface AesGcmEncryptResult {
 	iterations: number;
 	timestamp: number;
 	remark: string;
+	language?: string;
 }
 export interface AesGcmDecryptResult {
 	salt: string;
@@ -13,6 +14,7 @@ export interface AesGcmDecryptResult {
 	iterations: number;
 	timestamp: number;
 	remark: string;
+	language?: string;
 }
 
 /**
@@ -51,7 +53,7 @@ function base64ToArrayBuffer(base64: string) {
 export function stringToBase64(str: string) {
 	const encoder = new TextEncoder();
 	const dataBuffer = encoder.encode(str);
-	return arrayBufferToBase64(dataBuffer);
+	return arrayBufferToBase64(dataBuffer.buffer);
 }
 
 /**
@@ -63,6 +65,57 @@ export function base64ToString(base64Str: string) {
 	const dataBuffer = base64ToArrayBuffer(base64Str);
 	const decoder = new TextDecoder();
 	return decoder.decode(dataBuffer);
+}
+
+/**
+ * 判断内容是否为已加密的数据
+ * @param content 待检查的内容
+ * @returns true 表示已加密，false 表示未加密
+ */
+export function isEncryptedContent(content: string): boolean {
+	if (!content || content.trim() === "") {
+		return false;
+	}
+
+	try {
+		// 1. 检查是否为 base64 格式（允许有换行和空格）
+		const cleanContent = content.replace(/[\r\n\s]/g, "");
+		const base64Pattern = /^[A-Za-z0-9+/]+=*$/;
+		if (!base64Pattern.test(cleanContent)) {
+			return false;
+		}
+
+		// 2. 尝试解码 base64
+		const decoded = base64ToString(cleanContent);
+
+		// 3. 尝试解析为 JSON
+		const parsed = JSON.parse(decoded);
+
+		// 4. 检查是否包含必需的加密字段
+		const requiredFields = ["salt", "iv", "text", "iterations", "timestamp"];
+		const hasAllFields = requiredFields.every(
+			(field) => field in parsed && typeof parsed[field] !== "undefined"
+		);
+
+		if (!hasAllFields) {
+			return false;
+		}
+
+		// 5. 验证字段类型
+		const isValidStructure =
+			typeof parsed.salt === "string" &&
+			typeof parsed.iv === "string" &&
+			typeof parsed.text === "string" &&
+			typeof parsed.iterations === "number" &&
+			typeof parsed.timestamp === "number" &&
+			parsed.iterations > 0 &&
+			parsed.timestamp > 0;
+
+		return isValidStructure;
+	} catch (error) {
+		// 解析失败说明不是加密内容
+		return false;
+	}
 }
 
 /**
@@ -94,6 +147,7 @@ async function deriveKeyPbkdf2(
 	return window.crypto.subtle.deriveKey(
 		{
 			name: "PBKDF2",
+			// @ts-ignore
 			salt: saltUint8Array,
 			iterations: iterations, // 使用传入的迭代次数
 			hash: hashAlgorithm,
@@ -109,12 +163,15 @@ async function deriveKeyPbkdf2(
  *  AES-GCM 加密
  * @param text 待加密文本
  * @param password 加密密码
+ * @param remark 备注信息
+ * @param language 代码块语言
  * @returns 加密结果
  */
 export async function encryptAesGcm(
 	text: string,
 	password: string,
-	remark: string = ""
+	remark: string = "",
+	language: string = "text"
 ): Promise<AesGcmEncryptResult> {
 	try {
 		const salt = window.crypto.getRandomValues(new Uint8Array(16));
@@ -135,8 +192,8 @@ export async function encryptAesGcm(
 			cryptoKey,
 			plaintextBuffer
 		);
-		const saltStr = arrayBufferToBase64(salt);
-		const ivStr = arrayBufferToBase64(iv);
+		const saltStr = arrayBufferToBase64(salt.buffer);
+		const ivStr = arrayBufferToBase64(iv.buffer);
 		// 打包结果
 		const bundle: AesGcmEncryptResult = {
 			salt: saltStr,
@@ -145,6 +202,7 @@ export async function encryptAesGcm(
 			iterations: iterationSize,
 			timestamp: Date.now(),
 			remark: remark,
+			language: language,
 		};
 
 		return bundle;
@@ -199,6 +257,7 @@ export async function decryptAesGcm(
 			remark: bundle.remark,
 			iv: arrayBufferToBase64(iv),
 			salt: arrayBufferToBase64(salt),
+			language: bundle.language || "text",
 		};
 	} catch (error) {
 		// console.error(`解密失败: ${error.message}. (可能是密码错误、数据损坏或打包格式不正确)`);

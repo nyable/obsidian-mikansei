@@ -16,6 +16,7 @@ import {
 	decryptAesGcm,
 	encryptAesGcm,
 	stringToBase64,
+	isEncryptedContent,
 } from "src/utils/crypto-util";
 import { mount, unmount, type Component } from "svelte";
 
@@ -25,8 +26,11 @@ const activeComponents: Map<
 > = new Map();
 
 export const codeBlockCrypto = (plugin: Mikansei) => {
+	// 获取自定义的语言名称
+	const langName = plugin.settings.cryptoBlockLanguage || "usagi";
+
 	// 注册代码块
-	plugin.registerMarkdownCodeBlockProcessor("usagi", (source, el, ctx) => {
+	plugin.registerMarkdownCodeBlockProcessor(langName, (source, el, ctx) => {
 		const componentCache = activeComponents.get(el);
 		if (componentCache) {
 			unmount(componentCache);
@@ -38,8 +42,11 @@ export const codeBlockCrypto = (plugin: Mikansei) => {
 			target: el,
 			props: {
 				source: source,
-			},
-		});
+				el: el,
+				ctx: ctx,
+				plugin: plugin,
+			}
+		})
 		activeComponents.set(el, component);
 	});
 	// 注册命令
@@ -103,7 +110,7 @@ export const codeBlockCrypto = (plugin: Mikansei) => {
 	});
 
 	/**
-	 * 辅助函数：查找当前光标所在位置的 'jm' 代码块
+	 * 辅助函数：查找当前光标所在位置的加密代码块
 	 */
 	function findCryptoCodeBlock(
 		editor: Editor,
@@ -116,6 +123,13 @@ export const codeBlockCrypto = (plugin: Mikansei) => {
 		if (!fileCache || !fileCache.sections) {
 			return null;
 		}
+
+		// 获取自定义的语言名称
+		const langName = plugin.settings.cryptoBlockLanguage || "usagi";
+		// 构造动态正则表达式，转义特殊字符
+		const escapedLang = langName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+		const codeBlockPattern = new RegExp(`^\\s*\`\`\`\\s*${escapedLang}(\\s.*)?`);
+
 		const cursor = editor.getCursor();
 		for (const section of fileCache.sections) {
 			if (
@@ -126,7 +140,7 @@ export const codeBlockCrypto = (plugin: Mikansei) => {
 				const firstLineText = editor.getLine(
 					section.position.start.line
 				);
-				if (/^\s*```\s*usagi(\s.*)?/.test(firstLineText)) {
+				if (codeBlockPattern.test(firstLineText)) {
 					// 确保是标准的多行代码块结构，以便内容提取逻辑正确
 					if (
 						section.position.start.line < section.position.end.line
@@ -166,58 +180,107 @@ export const codeBlockCrypto = (plugin: Mikansei) => {
 
 		if (!fromPos || !toPos) {
 			// 也捕获了 contentStartLine > contentEndLine 的空块情况
-			new Notice("JM 代码块为空或无效，无法操作。");
+			new Notice("加密代码块为空或无效，无法操作");
 			return;
+		}
+
+		// 仅在解密时检查内容状态
+		if (operation === "decrypt") {
+			const isEncrypted = isEncryptedContent(currentContent);
+			if (!isEncrypted) {
+				new Notice(
+					"⚠️ 此代码块未加密，无需解密\n提示：只有已加密的内容才能解密",
+					4000
+				);
+				return;
+			}
 		}
 
 		const { password, remarks } = await dataProvider(); // 获取密码
 		if (password === null) {
-			new Notice("操作已取消。");
+			new Notice("操作已取消");
 			return;
 		}
 		if (password.trim() === "") {
-			new Notice("密码不能为空。");
+			new Notice("❌ 密码不能为空");
 			return;
 		}
 
 		try {
 			let newContent: string;
 			if (operation === "encrypt") {
-				new Notice("JM Block: 加密中...");
-				const encryptedObj = await encryptAesGcm(
-					currentContent,
-					password,
-					remarks
-				);
-				newContent = stringToBase64(JSON.stringify(encryptedObj));
-				editor.replaceRange(newContent, fromPos, toPos);
-				new Notice("JM 代码块已加密。");
+				const loadingNotice = new Notice("🔐 正在加密...", 0);
+				try {
+					const encryptedObj = await encryptAesGcm(
+						currentContent,
+						password,
+						remarks
+					);
+					newContent = stringToBase64(JSON.stringify(encryptedObj));
+					editor.replaceRange(newContent, fromPos, toPos);
+					loadingNotice.hide();
+					new Notice("✅ 加密成功", 3000);
+				} catch (err) {
+					loadingNotice.hide();
+					throw err;
+				}
 			} else {
 				// decrypt
 				if (currentContent.trim() === "") {
-					new Notice("JM 代码块内容为空，无需解密。");
+					new Notice("⚠️ 加密代码块内容为空，无需解密");
 					return;
 				}
-				new Notice("JM Block: 解密中...");
-				const decryptedResult = await decryptAesGcm(
-					currentContent,
-					password
-				); // 假设此函数处理base64和JSON
-				if (typeof decryptedResult?.text !== "string") {
-					throw new Error("解密函数未返回预期的文本格式。");
+
+				const loadingNotice = new Notice("🔓 正在解密...", 0);
+				try {
+					const decryptedResult = await decryptAesGcm(
+						currentContent,
+						password
+					);
+					if (typeof decryptedResult?.text !== "string") {
+						throw new Error("解密函数未返回预期的文本格式");
+					}
+					newContent = decryptedResult.text;
+					editor.replaceRange(newContent, fromPos, toPos);
+					loadingNotice.hide();
+					new Notice("✅ 解密成功", 3000);
+				} catch (err) {
+					loadingNotice.hide();
+					throw err;
 				}
-				newContent = decryptedResult.text;
-				editor.replaceRange(newContent, fromPos, toPos);
-				new Notice("JM 代码块已解密。");
 			}
 		} catch (e: unknown) {
 			const error = e instanceof Error ? e : new Error(String(e));
-			console.error(`JM Block ${operation} failed:`, error);
-			new Notice(
-				`${operation === "encrypt" ? "加密" : "解密"}失败: ${
-					error.message
-				}`
-			);
+			console.error(`加密代码块 ${operation} 操作失败:`, error);
+
+			// 根据错误类型提供更友好的提示
+			let errorMessage = "";
+			const errorMsg = error.message.toLowerCase();
+
+			if (operation === "decrypt") {
+				if (errorMsg.includes("invalid") || errorMsg.includes("格式")) {
+					errorMessage = "❌ 解密失败：数据格式不正确，可能已损坏";
+				} else if (errorMsg.includes("decrypt") || errorMsg.includes("解密") || errorMsg.includes("password")) {
+					errorMessage = "❌ 解密失败：密码错误或数据已损坏";
+				} else if (errorMsg.includes("base64")) {
+					errorMessage = "❌ 解密失败：数据编码错误";
+				} else if (errorMsg.includes("json") || errorMsg.includes("parse")) {
+					errorMessage = "❌ 解密失败：数据结构损坏";
+				} else {
+					errorMessage = `❌ 解密失败：${error.message}`;
+				}
+			} else {
+				// encrypt
+				if (errorMsg.includes("password") || errorMsg.includes("密码")) {
+					errorMessage = "❌ 加密失败：密码处理出错";
+				} else if (errorMsg.includes("memory") || errorMsg.includes("内存")) {
+					errorMessage = "❌ 加密失败：内容过大";
+				} else {
+					errorMessage = `❌ 加密失败：${error.message}`;
+				}
+			}
+
+			new Notice(errorMessage, 5000);
 		}
 	}
 };

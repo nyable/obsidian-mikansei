@@ -8,12 +8,14 @@ interface PluginSettings {
 	linkPasteEnhancer: boolean;
 	fetchTitle: boolean;
 	fetchTitleTimeout: number;
+	cryptoBlockLanguage: string;
 }
 
 const DEFAULT_SETTINGS: PluginSettings = {
 	linkPasteEnhancer: true,
 	fetchTitle: true,
 	fetchTitleTimeout: 1000,
+	cryptoBlockLanguage: "usagi",
 };
 
 export default class Mikansei extends Plugin {
@@ -159,6 +161,31 @@ class MikanseiSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					}
 				);
+			});
+
+		new Setting(containerEl)
+			.setName("加密代码块语言名称")
+			.setDesc(
+				"自定义加密代码块的语言标识符（如 ```usagi）。修改后需要重新加载插件才能生效。"
+			)
+			.addText((cb) => {
+				cb.setPlaceholder("usagi")
+					.setValue(pluginSetting.cryptoBlockLanguage)
+					.onChange(async (value: string) => {
+						// 验证：不能为空，不能包含空白字符
+						const trimmed = value.trim();
+						if (trimmed === "") {
+							cb.inputEl.addClass("is-invalid");
+							return;
+						}
+						if (/\s/.test(trimmed)) {
+							cb.inputEl.addClass("is-invalid");
+							return;
+						}
+						cb.inputEl.removeClass("is-invalid");
+						pluginSetting.cryptoBlockLanguage = trimmed;
+						await this.plugin.saveSettings();
+					});
 			});
 	}
 }
