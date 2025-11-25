@@ -1,5 +1,6 @@
-import { App, Plugin, PluginSettingTab, Setting } from "obsidian";
-import { highlightBracket } from "./extension/HightlightBracketMatching";
+import { App, Plugin, PluginSettingTab, Setting, Editor, MarkdownView } from "obsidian";
+import { matchBrackets } from "@codemirror/language";
+import { highlightBracket, latestMatch } from "./extension/HightlightBracketMatching";
 import { enhanceLinkPaste } from "./event/LinkPasteEnhancer";
 import { codeBlockCrypto } from "./extension/CodeBlockCrypto";
 
@@ -21,14 +22,77 @@ export default class Mikansei extends Plugin {
 	async onload() {
 		await this.loadSettings();
 		this.addSettingTab(new MikanseiSettingTab(this.app, this));
-		this.registerEditorExtension([highlightBracket(this)]);
+		this.registerEditorExtension([highlightBracket()]);
+
+		this.addCommand({
+			id: "nya-bracket-jump",
+			name: "Jump to bracket(跳转到匹配符号)",
+			icon: "braces",
+			editorCheckCallback: (checking, editor, view) => {
+				if (!(view instanceof MarkdownView)) return false;
+
+				if (!latestMatch) return false;
+
+				const { start, end } = latestMatch;
+				const offset = editor.posToOffset(editor.getCursor("from"));
+
+				const displayFlag =
+					(start.from <= offset && start.to >= offset) ||
+					(end.from <= offset && end.to >= offset);
+
+				if (displayFlag) {
+					if (!checking) {
+						editor.setCursor(editor.offsetToPos(end.to));
+					}
+					return true;
+				}
+
+				return false;
+			},
+		});
+
+		this.addCommand({
+			id: "nya-bracket-select",
+			name: "Select to bracket(选择到匹配符号)",
+			icon: "braces",
+			editorCheckCallback: (checking, editor, view) => {
+				if (!(view instanceof MarkdownView)) return false;
+
+				if (!latestMatch) return false;
+
+				const { start, end } = latestMatch;
+				const offset = editor.posToOffset(editor.getCursor("from"));
+
+				const displayFlag =
+					(start.from <= offset && start.to >= offset) ||
+					(end.from <= offset && end.to >= offset);
+
+				if (displayFlag) {
+					if (!checking) {
+						const isEnd = start.to > end.to;
+
+						editor.setSelection(
+							editor.offsetToPos(
+								isEnd ? start.to : start.from
+							),
+							editor.offsetToPos(
+								isEnd ? end.from : end.to
+							)
+						);
+					}
+					return true;
+				}
+
+				return false;
+			},
+		});
 		if (this.settings.linkPasteEnhancer) {
 			enhanceLinkPaste(this);
 		}
 		codeBlockCrypto(this);
 	}
 
-	onunload() {}
+	onunload() { }
 
 	async loadSettings() {
 		this.settings = Object.assign(
