@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { Notice, TFile, MarkdownRenderer } from "obsidian";
+	import { portal } from "../utils/portal";
 	import {
 		AlertCircle,
 		Copy,
@@ -428,7 +429,7 @@
 	{#if showPasswordDialog}
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="modal-container" onclick={cancelDialog}>
+		<div class="modal-container" onclick={cancelDialog} use:portal>
 			<div class="modal-bg"></div>
 			<div
 				class="modal"
@@ -512,7 +513,7 @@
 	{#if showEncryptDialog}
 		<!-- svelte-ignore a11y_click_events_have_key_events -->
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="modal-container" onclick={cancelEncryptDialog}>
+		<div class="modal-container" onclick={cancelEncryptDialog} use:portal>
 			<div class="modal-bg"></div>
 			<div
 				class="modal encrypt-dialog"
