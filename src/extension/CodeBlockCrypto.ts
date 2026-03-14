@@ -294,7 +294,7 @@ export const codeBlockCrypto = (plugin: Mikansei) => {
 	}
 };
 
-class ConfirmCryptoDialog extends Modal {
+export class ConfirmCryptoDialog extends Modal {
 	form: ReturnType<Component> | null = null;
 	onSubmit: (data: CryptoConfirmData) => void;
 	type: "encrypt" | "decrypt";

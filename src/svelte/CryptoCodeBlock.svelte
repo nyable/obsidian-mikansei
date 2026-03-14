@@ -1,18 +1,15 @@
 <script lang="ts">
 	import { Notice, TFile, MarkdownRenderer } from "obsidian";
-	import { portal } from "../utils/portal";
 	import {
-		AlertCircle,
 		Copy,
 		Eye,
-		EyeOff,
 		KeyRound,
-		Lock,
 		LockKeyholeOpen,
 		X,
 	} from "lucide-svelte";
 	import type { MarkdownPostProcessorContext } from "obsidian";
 	import type Mikansei from "src/main";
+	import { ConfirmCryptoDialog } from "src/extension/CodeBlockCrypto";
 	import {
 		base64ToString,
 		decryptAesGcm,
@@ -32,16 +29,6 @@
 	const props: CryptoCodeBlockProps = $props();
 
 	// 状态管理
-	let showPasswordDialog = $state(false);
-	let showEncryptDialog = $state(false);
-	let passwordInput = $state("");
-	let encryptPasswordInput = $state("");
-	let encryptPasswordConfirm = $state("");
-	let encryptRemarkInput = $state("");
-	let encryptLanguageInput = $state("text");
-	let showPasswordText = $state(false);
-	let showEncryptPasswordText = $state(false);
-	let showEncryptConfirmText = $state(false);
 	let isProcessing = $state(false);
 	let decryptedContent = $state<string | null>(null);
 	let decryptedLanguage = $state<string>("text");
@@ -67,13 +54,6 @@
 		}
 	});
 
-	// 表单验证
-	let encryptFormValid = $derived(
-		encryptPasswordInput.trim() !== "" &&
-			encryptPasswordInput === encryptPasswordConfirm &&
-			encryptRemarkInput.trim() !== "",
-	);
-
 	// 处理复制
 	async function handleCopy() {
 		if (!isEncrypted) {
@@ -82,7 +62,9 @@
 			return;
 		}
 		dialogAction = "copy";
-		showPasswordDialog = true;
+		new ConfirmCryptoDialog(props.plugin.app, "decrypt", (data) => {
+			confirmPassword(data.password);
+		}).open();
 	}
 
 	// 处理预览
@@ -92,18 +74,24 @@
 			return;
 		}
 		dialogAction = "preview";
-		showPasswordDialog = true;
+		new ConfirmCryptoDialog(props.plugin.app, "decrypt", (data) => {
+			confirmPassword(data.password);
+		}).open();
 	}
 
 	// 处理加密
 	function handleEncrypt() {
-		showEncryptDialog = true;
+		new ConfirmCryptoDialog(props.plugin.app, "encrypt", (data) => {
+			confirmEncrypt(data.password, data.remarks, data.language);
+		}).open();
 	}
 
 	// 处理解密
 	function handleDecrypt() {
 		dialogAction = "decrypt";
-		showPasswordDialog = true;
+		new ConfirmCryptoDialog(props.plugin.app, "decrypt", (data) => {
+			confirmPassword(data.password);
+		}).open();
 	}
 
 	// 关闭预览
@@ -157,7 +145,7 @@
 	}
 
 	// 确认解密密码
-	async function confirmPassword() {
+	async function confirmPassword(passwordInput: string) {
 		if (!passwordInput.trim()) return;
 
 		isProcessing = true;
@@ -174,10 +162,6 @@
 				// 解密到源文件
 				await decryptToFile(result.text);
 			}
-
-			showPasswordDialog = false;
-			passwordInput = "";
-			showPasswordText = false;
 		} catch (error) {
 			new Notice("❌ 解密失败：密码错误或数据已损坏", 5000);
 		} finally {
@@ -186,9 +170,7 @@
 	}
 
 	// 确认加密
-	async function confirmEncrypt() {
-		if (!encryptFormValid) return;
-
+	async function confirmEncrypt(encryptPasswordInput: string, encryptRemarkInput: string, encryptLanguageInput?: string) {
 		isProcessing = true;
 		try {
 			// 获取要加密的内容
@@ -199,7 +181,7 @@
 				contentToEncrypt,
 				encryptPasswordInput,
 				encryptRemarkInput,
-				encryptLanguageInput,
+				encryptLanguageInput || "text",
 			);
 			const encryptedContent = stringToBase64(
 				JSON.stringify(encryptedObj),
@@ -238,13 +220,6 @@
 			await props.plugin.app.vault.modify(tfile, newLines.join("\n"));
 
 			// 重置状态
-			showEncryptDialog = false;
-			encryptPasswordInput = "";
-			encryptPasswordConfirm = "";
-			encryptRemarkInput = "";
-			showEncryptPasswordText = false;
-			showEncryptConfirmText = false;
-			showEncryptConfirmText = false;
 			decryptedContent = null;
 			decryptedLanguage = "text";
 		} catch (error) {
@@ -255,40 +230,6 @@
 			);
 		} finally {
 			isProcessing = false;
-		}
-	}
-
-	// 取消对话框
-	function cancelDialog() {
-		showPasswordDialog = false;
-		passwordInput = "";
-		showPasswordText = false;
-	}
-
-	function cancelEncryptDialog() {
-		showEncryptDialog = false;
-		encryptPasswordInput = "";
-		encryptPasswordConfirm = "";
-		encryptRemarkInput = "";
-		encryptLanguageInput = "text";
-		showEncryptPasswordText = false;
-		showEncryptConfirmText = false;
-	}
-
-	// 键盘事件
-	function handleKeyDown(e: KeyboardEvent) {
-		if (e.key === "Enter" && !isProcessing) {
-			confirmPassword();
-		} else if (e.key === "Escape") {
-			cancelDialog();
-		}
-	}
-
-	function handleEncryptKeyDown(e: KeyboardEvent) {
-		if (e.key === "Enter" && encryptFormValid && !isProcessing) {
-			confirmEncrypt();
-		} else if (e.key === "Escape") {
-			cancelEncryptDialog();
 		}
 	}
 
@@ -425,254 +366,6 @@
 		</div>
 	</div>
 
-	<!-- 解密密码输入对话框 -->
-	{#if showPasswordDialog}
-		<!-- svelte-ignore a11y_click_events_have_key_events -->
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="modal-container" onclick={cancelDialog} use:portal>
-			<div class="modal-bg"></div>
-			<div
-				class="modal"
-				onclick={(e) => e.stopPropagation()}
-				onkeydown={handleKeyDown}
-				role="dialog"
-				aria-labelledby="dialog-title"
-				tabindex="-1"
-			>
-				<button
-					class="modal-close-button"
-					onclick={cancelDialog}
-					aria-label="Close"
-				>
-					<X size={20} />
-				</button>
-				<div class="modal-title" id="dialog-title">
-					<Lock size={18} class="modal-icon" />
-					请输入解密密码
-				</div>
-
-				<div class="modal-content">
-					<div class="dialog-item">
-						<div class="dialog-item-info">
-							<div class="dialog-item-name">密码</div>
-							<div class="dialog-item-description">
-								请输入用于解密的密码
-							</div>
-						</div>
-						<div class="dialog-item-control">
-							<div class="input-wrapper">
-								<input
-									type={showPasswordText
-										? "text"
-										: "password"}
-									bind:value={passwordInput}
-									placeholder="请输入密码"
-									disabled={isProcessing}
-								/>
-								<button
-									class="toggle-visible"
-									onclick={() =>
-										(showPasswordText = !showPasswordText)}
-									aria-label={showPasswordText
-										? "隐藏密码"
-										: "显示密码"}
-								>
-									{#if showPasswordText}
-										<EyeOff size={14} />
-									{:else}
-										<Eye size={14} />
-									{/if}
-								</button>
-							</div>
-						</div>
-					</div>
-				</div>
-
-				<div class="modal-button-container">
-					<button
-						class="mod-cta"
-						onclick={confirmPassword}
-						disabled={isProcessing || !passwordInput.trim()}
-					>
-						{#if isProcessing}
-							<span class="loading-spinner"></span>
-							解密中...
-						{:else}
-							确定
-						{/if}
-					</button>
-					<button onclick={cancelDialog} disabled={isProcessing}
-						>取消</button
-					>
-				</div>
-			</div>
-		</div>
-	{/if}
-
-	<!-- 加密对话框 -->
-	{#if showEncryptDialog}
-		<!-- svelte-ignore a11y_click_events_have_key_events -->
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="modal-container" onclick={cancelEncryptDialog} use:portal>
-			<div class="modal-bg"></div>
-			<div
-				class="modal encrypt-dialog"
-				onclick={(e) => e.stopPropagation()}
-				onkeydown={handleEncryptKeyDown}
-				role="dialog"
-				aria-labelledby="encrypt-dialog-title"
-				tabindex="-1"
-			>
-				<button
-					class="modal-close-button"
-					onclick={cancelEncryptDialog}
-					aria-label="Close"
-				>
-					<X size={20} />
-				</button>
-				<div class="modal-title" id="encrypt-dialog-title">
-					<KeyRound size={18} class="modal-icon" />
-					加密代码块
-				</div>
-
-				<div class="modal-content">
-					<div class="dialog-item">
-						<div class="dialog-item-info">
-							<div class="dialog-item-name">密码</div>
-							<div class="dialog-item-description">
-								设置加密密码
-							</div>
-						</div>
-						<div class="dialog-item-control">
-							<div class="input-wrapper">
-								<input
-									type={showEncryptPasswordText
-										? "text"
-										: "password"}
-									bind:value={encryptPasswordInput}
-									placeholder="请输入密码"
-									disabled={isProcessing}
-								/>
-								<button
-									class="toggle-visible"
-									onclick={() =>
-										(showEncryptPasswordText =
-											!showEncryptPasswordText)}
-									aria-label={showEncryptPasswordText
-										? "隐藏密码"
-										: "显示密码"}
-								>
-									{#if showEncryptPasswordText}
-										<EyeOff size={14} />
-									{:else}
-										<Eye size={14} />
-									{/if}
-								</button>
-							</div>
-						</div>
-					</div>
-
-					<div class="dialog-item">
-						<div class="dialog-item-info">
-							<div class="dialog-item-name">确认密码</div>
-							<div class="dialog-item-description">
-								再次输入以确认
-								{#if encryptPasswordInput && encryptPasswordConfirm && encryptPasswordInput !== encryptPasswordConfirm}
-									<div class="error-text">
-										<AlertCircle size={12} /> 两次输入的密码不一致
-									</div>
-								{/if}
-							</div>
-						</div>
-						<div class="dialog-item-control">
-							<div class="input-wrapper">
-								<input
-									type={showEncryptConfirmText
-										? "text"
-										: "password"}
-									bind:value={encryptPasswordConfirm}
-									placeholder="请再次输入密码"
-									disabled={isProcessing}
-									class:error={encryptPasswordInput &&
-										encryptPasswordConfirm &&
-										encryptPasswordInput !==
-											encryptPasswordConfirm}
-								/>
-								<button
-									class="toggle-visible"
-									onclick={() =>
-										(showEncryptConfirmText =
-											!showEncryptConfirmText)}
-									aria-label={showEncryptConfirmText
-										? "隐藏密码"
-										: "显示密码"}
-								>
-									{#if showEncryptConfirmText}
-										<EyeOff size={14} />
-									{:else}
-										<Eye size={14} />
-									{/if}
-								</button>
-							</div>
-						</div>
-					</div>
-
-					<div class="dialog-item">
-						<div class="dialog-item-info">
-							<div class="dialog-item-name">显示文本</div>
-							<div class="dialog-item-description">
-								未解密时显示的备注信息
-							</div>
-						</div>
-						<div class="dialog-item-control">
-							<textarea
-								bind:value={encryptRemarkInput}
-								placeholder="请输入显示文本"
-								rows="2"
-								disabled={isProcessing}
-							></textarea>
-						</div>
-					</div>
-
-					<div class="dialog-item">
-						<div class="dialog-item-info">
-							<div class="dialog-item-name">渲染语言</div>
-							<div class="dialog-item-description">
-								解密后代码块的语言
-							</div>
-						</div>
-						<div class="dialog-item-control">
-							<input
-								type="text"
-								bind:value={encryptLanguageInput}
-								placeholder="text"
-								disabled={isProcessing}
-							/>
-						</div>
-					</div>
-				</div>
-
-				<div class="modal-button-container">
-					<button
-						class="mod-cta"
-						onclick={confirmEncrypt}
-						disabled={isProcessing || !encryptFormValid}
-					>
-						{#if isProcessing}
-							<span class="loading-spinner"></span>
-							加密中...
-						{:else}
-							确定
-						{/if}
-					</button>
-					<button
-						onclick={cancelEncryptDialog}
-						disabled={isProcessing}>取消</button
-					>
-				</div>
-			</div>
-		</div>
-	{/if}
 </div>
 
 <style lang="scss">
