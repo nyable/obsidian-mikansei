@@ -184,9 +184,9 @@ export const codeBlockCrypto = (plugin: Mikansei) => {
 			return;
 		}
 
-		// 仅在解密时检查内容状态
+		// 检查内容状态
+		const isEncrypted = isEncryptedContent(currentContent);
 		if (operation === "decrypt") {
-			const isEncrypted = isEncryptedContent(currentContent);
 			if (!isEncrypted) {
 				new Notice(
 					"⚠️ 此代码块未加密，无需解密\n提示：只有已加密的内容才能解密",
@@ -194,9 +194,17 @@ export const codeBlockCrypto = (plugin: Mikansei) => {
 				);
 				return;
 			}
+		} else if (operation === "encrypt") {
+			if (isEncrypted) {
+				new Notice(
+					"⚠️ 此代码块已加密",
+					4000
+				);
+				return;
+			}
 		}
 
-		const { password, remarks } = await dataProvider(); // 获取密码
+		const { password, remarks, language } = await dataProvider(); // 获取密码
 		if (password === null) {
 			new Notice("操作已取消");
 			return;
@@ -214,7 +222,8 @@ export const codeBlockCrypto = (plugin: Mikansei) => {
 					const encryptedObj = await encryptAesGcm(
 						currentContent,
 						password,
-						remarks
+						remarks,
+						language
 					);
 					newContent = stringToBase64(JSON.stringify(encryptedObj));
 					editor.replaceRange(newContent, fromPos, toPos);
@@ -335,4 +344,5 @@ class ConfirmCryptoDialog extends Modal {
 export interface CryptoConfirmData {
 	password: string;
 	remarks: string;
+	language?: string;
 }

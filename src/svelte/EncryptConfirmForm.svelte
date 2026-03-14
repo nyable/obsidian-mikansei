@@ -8,6 +8,7 @@
 	let password = $state("");
 	let confirmPassword = $state("");
 	let remarks = $state("");
+	let language = $state("text");
 	let showPassword = $state(false);
 	let showConfirmPassword = $state(false);
 	const minPasswordLength = 1;
@@ -68,12 +69,13 @@
 		}
 
 		if (canSubmit) {
-			const data = { password, remarks };
+			const data: CryptoConfirmData = { password, remarks, language };
 			props.submitHandler(data);
 			console.log("表单提交的数据:", data);
 			password = "";
 			confirmPassword = "";
 			remarks = "";
+			language = "text";
 			passwordErrorMessage = "";
 			confirmPasswordErrorMessage = "";
 			remarksErrorMessage = "";
@@ -270,6 +272,21 @@
 				aria-live="polite"
 			>
 				{remarksErrorMessage || "\u00a0"}
+			</p>
+		</div>
+
+		<div class="form-group">
+			<label for="language">渲染语言</label>
+			<div class="input-wrapper">
+				<input
+					type="text"
+					id="language"
+					bind:value={language}
+					placeholder="text"
+				/>
+			</div>
+			<p class="error-message" style:visibility="hidden" aria-live="polite">
+				&nbsp;
 			</p>
 		</div>
 
