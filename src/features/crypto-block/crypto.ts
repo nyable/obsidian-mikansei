@@ -112,7 +112,7 @@ export function isEncryptedContent(content: string): boolean {
 			parsed.timestamp > 0;
 
 		return isValidStructure;
-	} catch (error) {
+	} catch {
 		// 解析失败说明不是加密内容
 		return false;
 	}

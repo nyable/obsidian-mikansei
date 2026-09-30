@@ -1,32 +1,8 @@
-import { App, Editor, SuggestModal } from "obsidian";
+import type { Editor } from "obsidian";
 import type Mikansei from "src/main";
-import { getUrlTitle } from "../utils/http-util";
-interface LinkAction {
-	label: string;
-	value: string;
-	callback: (value: string) => void;
-}
-
-class LinkActionModal extends SuggestModal<LinkAction> {
-	constructor(app: App) {
-		super(app);
-	}
-	getSuggestions(query: string): LinkAction[] {
-		return [];
-	}
-
-	renderSuggestion(action: LinkAction, el: HTMLElement) {
-		el.createEl("div", { text: action.label });
-		el.createEl("div", {
-			text: action.value,
-			attr: {
-				style: "font-size: 12px;text-overflow: ellipsis;overflow: hidden;",
-			},
-		});
-	}
-
-	onChooseSuggestion(action: LinkAction, evt: MouseEvent | KeyboardEvent) {}
-}
+import { getUrlTitle } from "src/shared/http";
+import { i18n } from "src/i18n";
+import { LinkActionModal, type LinkAction } from "./LinkActionModal";
 
 async function replaceByText(
 	editor: Editor,
@@ -93,9 +69,9 @@ export const enhanceLinkPaste = (plugin: Mikansei) => {
 
 						const model = new LinkActionModal(plugin.app);
 
-						const suggestions = [
+						const suggestions: LinkAction[] = [
 							{
-								label: "1. 作为链接",
+								label: `1. ${i18n.t("linkPaste.asLink")}`,
 								value: `[${title}](${urlStr})`,
 								callback: (value: string) => {
 									replaceByText(
@@ -109,14 +85,14 @@ export const enhanceLinkPaste = (plugin: Mikansei) => {
 								},
 							},
 							{
-								label: "2. 作为文本",
+								label: `2. ${i18n.t("linkPaste.asText")}`,
 								value: originText,
 								callback: (value: string) => {
 									editor.replaceSelection(value);
 								},
 							},
 							{
-								label: "3. 作为图片",
+								label: `3. ${i18n.t("linkPaste.asImage")}`,
 								value: `![${title}](${urlStr})`,
 								callback: (value: string) => {
 									replaceByText(
@@ -131,15 +107,9 @@ export const enhanceLinkPaste = (plugin: Mikansei) => {
 							},
 						];
 
-						model.getSuggestions = (q: string) => {
-							return suggestions.filter((s) =>
-								s.label.includes(q)
-							);
-						};
-						model.onChooseSuggestion = (
-							suggestion: LinkAction,
-							evt: MouseEvent | KeyboardEvent
-						) => {
+						model.getSuggestions = (q: string) =>
+							suggestions.filter((s) => s.label.includes(q));
+						model.onChooseSuggestion = (suggestion: LinkAction) => {
 							suggestion.callback(suggestion.value);
 						};
 						model.open();

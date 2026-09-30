@@ -1,18 +1,25 @@
 {
-	"extends": "@tsconfig/svelte/tsconfig.json",
 	"compilerOptions": {
-		"types": ["svelte", "node"],
-		"baseUrl": ".",
+		"target": "ES2020",
 		"module": "ESNext",
-		"target": "ES6",
-		"allowJs": true,
+		"moduleResolution": "bundler",
+		"jsx": "react-jsx",
+		"lib": ["DOM", "DOM.Iterable", "ES2020"],
+		"types": ["node"],
+		"strict": true,
 		"noImplicitAny": true,
-		"moduleResolution": "node",
-		"importHelpers": true,
-		"isolatedModules": true,
 		"strictNullChecks": true,
+		"noEmit": true,
+		"isolatedModules": true,
+		"verbatimModuleSyntax": true,
+		"esModuleInterop": true,
+		"allowSyntheticDefaultImports": true,
 		"resolveJsonModule": true,
-		"lib": ["DOM", "ES5", "ES6", "ES7"]
+		"skipLibCheck": true,
+		"forceConsistentCasingInFileNames": true,
+		"paths": {
+			"src/*": ["./src/*"]
+		}
 	},
-	"include": ["**/*.ts", "**/*.svelte", "**/*.d.ts"]
+	"include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts", "vite.config.mts"]
 }
