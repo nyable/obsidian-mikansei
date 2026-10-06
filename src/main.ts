@@ -41,6 +41,9 @@ export default class Mikansei extends Plugin {
 			DEFAULT_SETTINGS,
 			await this.loadData()
 		);
+		if (!Number.isInteger(this.settings.cryptoAutoLockMinutes) || this.settings.cryptoAutoLockMinutes < 0 || this.settings.cryptoAutoLockMinutes > 120) {
+			this.settings.cryptoAutoLockMinutes = DEFAULT_SETTINGS.cryptoAutoLockMinutes;
+		}
 	}
 
 	async saveSettings() {

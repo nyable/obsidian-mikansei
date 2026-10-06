@@ -14,6 +14,7 @@ export const codeBlockCrypto = (plugin: Mikansei) => {
 			new ReactRenderChild(
 				el,
 				createElement(CryptoCodeBlockView, {
+					key: source,
 					source,
 					el,
 					ctx,

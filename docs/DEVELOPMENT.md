@@ -2,13 +2,14 @@
 
 ## 环境与命令
 
-需要 Node.js 与 pnpm。
+使用 Node.js 24 LTS（`.node-version`）与 pnpm 12.3.4（`package.json` 的 `packageManager`）。CI 与本地统一使用 pnpm，不混用 `npm install`，依赖更新须提交 `pnpm-lock.yaml`。
 
 ```bash
-pnpm install     # 安装依赖
+pnpm install --frozen-lockfile # 按锁文件安装依赖（本地和 CI）
 pnpm dev         # watch 构建（vite build --watch --mode development）
 pnpm build       # 生产构建，内含 tsc --noEmit 类型检查
 pnpm lint        # ESLint
+pnpm test        # 回归测试
 ```
 
 构建产物在 `dist/`：
@@ -94,3 +95,8 @@ src/
 
 - 版本号在 `manifest.json` 与 `versions.json` 中维护；`pnpm version` 会调用 `version-bump.mjs` 并 `git add` 这两个文件。
 - 发布产物为 `dist/` 中的 `main.js`、`styles.css`、`manifest.json`。
+- 推送分支或提交 PR 会自动执行冻结安装、lint、测试和构建；推送 tag 时，还会校验发布版本并创建 Draft Release。
+- 发布前运行 `pnpm check:release -- <tag>`，确认 tag（允许 `v` 前缀）、`package.json`、`manifest.json` 与 `versions.json` 一致，且构建产物完整。直接使用 `node scripts/check-release.mjs <tag>` 也可。
+- 构建 job 仅有 `contents: read` 权限；独立发布 job 仅下载同次运行的产物并创建草稿，不执行依赖安装或项目代码。
+- Actions 使用完整 commit SHA 固定版本，由 Dependabot 每周检查更新。缓存仅保存 pnpm store，不缓存 `node_modules`。
+- 工作流修复后，应从包含修复提交的新版本 tag 发布；重新运行旧 tag 的任务通常仍使用旧工作流。不要随意移动已发布 tag。

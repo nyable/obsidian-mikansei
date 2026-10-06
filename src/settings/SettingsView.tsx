@@ -38,7 +38,7 @@ const TAB_KEYS: Record<TabId, (keyof PluginSettings)[]> = {
 		"bracketMissColor",
 		"highlightUnmatchedBrackets",
 	],
-	crypto: ["cryptoBlockEnabled", "cryptoBlockLanguage", "cryptoBlockHeight"],
+	crypto: ["cryptoBlockEnabled", "cryptoBlockLanguage", "cryptoBlockHeight", "cryptoAutoLockMinutes"],
 	misc: Object.keys(DEFAULT_SETTINGS) as (keyof PluginSettings)[],
 };
 
@@ -58,7 +58,8 @@ export function SettingsView({ plugin }: SettingsViewProps) {
 	};
 
 	const update = (patch: Partial<PluginSettings>) => {
-		const next = { ...settings, ...patch };
+		// Draft flushes on tab unmount must merge with the latest committed settings.
+		const next = { ...plugin.settings, ...patch };
 		setSettings(next);
 		Object.assign(plugin.settings, next);
 		void plugin.saveSettings();

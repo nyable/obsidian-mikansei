@@ -10,6 +10,7 @@ export interface PluginSettings {
 	cryptoBlockEnabled: boolean;
 	cryptoBlockLanguage: string;
 	cryptoBlockHeight: number;
+	cryptoAutoLockMinutes: number;
 	bracketMatchingEnabled: boolean;
 	bracketStyle: BracketStyle;
 	bracketMatchColor: string;
@@ -25,6 +26,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
 	cryptoBlockEnabled: true,
 	cryptoBlockLanguage: "nya",
 	cryptoBlockHeight: 300,
+	cryptoAutoLockMinutes: 5,
 	bracketMatchingEnabled: true,
 	bracketStyle: "border",
 	bracketMatchColor: "#808080",

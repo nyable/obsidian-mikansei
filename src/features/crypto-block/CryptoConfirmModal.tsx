@@ -1,59 +1,67 @@
-import { Modal } from "obsidian";
-import type { App } from "obsidian";
+import { Modal, Setting, type App } from "obsidian";
 import { createRoot, type Root } from "react-dom/client";
-import { DecryptDialog } from "./components/DecryptDialog";
-import { EncryptDialog } from "./components/EncryptDialog";
-import type { CryptoConfirmData } from "./types";
+import { CryptoDialog } from "./components/CryptoDialog";
+import type { CryptoDialogOptions } from "./types";
+import { i18n } from "src/i18n";
 
-/**
- * 打开加解密确认对话框，返回用户提交的数据；关闭/取消时返回 null。
- */
-export function openCryptoDialog(
-	app: App,
-	type: "encrypt" | "decrypt"
-): Promise<CryptoConfirmData | null> {
-	return new Promise((resolve) => {
-		new CryptoConfirmModal(app, type, resolve).open();
-	});
+/** Keep the modal open until validation and the requested operation succeed. */
+export function openCryptoDialog(app: App, options: CryptoDialogOptions): Promise<boolean> {
+	return new Promise((resolve) => new CryptoConfirmModal(app, options, resolve).open());
 }
 
 class CryptoConfirmModal extends Modal {
 	private root: Root | null = null;
 	private settled = false;
-
-	constructor(
-		app: App,
-		private readonly type: "encrypt" | "decrypt",
-		private readonly resolve: (data: CryptoConfirmData | null) => void
-	) {
+	private busy = false;
+	constructor(app: App, private options: CryptoDialogOptions, private resolve: (success: boolean) => void) {
 		super(app);
 	}
-
 	onOpen(): void {
+		this.modalEl.addClass("nya-crypto-modal");
+		this.titleEl.setText(this.options.title);
 		this.root = createRoot(this.contentEl);
-		const submit = (data: CryptoConfirmData) => {
-			this.settle(data);
+		this.root.render(<CryptoDialog options={{ ...this.options, onSubmit: async (data) => {
+			this.busy = true;
+			try { await this.options.onSubmit(data); } finally { this.busy = false; }
+		} }} onSuccess={() => {
+			this.settle(true);
 			this.close();
-		};
-		this.root.render(
-			this.type === "encrypt" ? (
-				<EncryptDialog submitHandler={submit} />
-			) : (
-				<DecryptDialog submitHandler={submit} />
-			)
-		);
+		}} onCancel={() => this.close()} />);
 	}
-
+	close(): void {
+		// Escape / outside click must not hide an in-flight file mutation.
+		if (!this.busy) super.close();
+	}
 	onClose(): void {
-		this.settle(null);
+		this.settle(false);
 		this.root?.unmount();
 		this.root = null;
 		this.contentEl.empty();
 	}
-
-	private settle(data: CryptoConfirmData | null): void {
+	private settle(success: boolean): void {
 		if (this.settled) return;
 		this.settled = true;
-		this.resolve(data);
+		this.resolve(success);
 	}
+}
+
+export function askDirtyAction(app: App): Promise<"save" | "discard" | "continue"> {
+	return new Promise((resolve) => {
+		const modal = new Modal(app);
+		let settled = false;
+		const choose = (action: "save" | "discard" | "continue") => {
+			if (settled) return;
+			settled = true;
+			resolve(action);
+			modal.close();
+		};
+		modal.titleEl.setText(i18n.t("crypto.ui.unsaved"));
+		modal.contentEl.createEl("p", { text: i18n.t("crypto.ui.unsavedHint") });
+		new Setting(modal.contentEl)
+			.addButton((button) => button.setButtonText(i18n.t("crypto.ui.continueEditing")).onClick(() => choose("continue")))
+			.addButton((button) => button.setButtonText(i18n.t("crypto.ui.discard")).setWarning().onClick(() => choose("discard")))
+			.addButton((button) => button.setButtonText(i18n.t("crypto.ui.saveEncrypted")).setCta().onClick(() => choose("save")));
+		modal.onClose = () => choose("continue");
+		modal.open();
+	});
 }

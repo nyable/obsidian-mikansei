@@ -1,18 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { MarkdownRenderer, Notice, TFile } from "obsidian";
-import type { MarkdownPostProcessorContext } from "obsidian";
-import { Copy, Eye, KeyRound, LockKeyholeOpen, X } from "lucide-react";
+import { loadPrism, Menu, Notice, type MarkdownPostProcessorContext } from "obsidian";
+import { Copy, Ellipsis, LockKeyhole, LockKeyholeOpen, Pencil } from "lucide-react";
 import type Mikansei from "src/main";
-import { openCryptoDialog } from "../CryptoConfirmModal";
-import {
-	base64ToString,
-	decryptAesGcm,
-	encryptAesGcm,
-	isEncryptedContent,
-	stringToBase64,
-	type AesGcmDecryptResult,
-} from "../crypto";
+import { confirmModal } from "src/shared/confirmModal";
+import { askDirtyAction, openCryptoDialog } from "../CryptoConfirmModal";
+import { isEncryptedContent } from "../crypto";
+import { captureTarget, writeTarget, type BlockTarget } from "../blockStorage";
+import { BlockConflictError } from "../blockContent";
+import { cryptoErrorMessage, encryptContent, readBundle, safeLanguage, unlockContent } from "../cryptoService";
+import { autoLockDecision } from "../autoLock";
 
 interface CryptoCodeBlockViewProps {
 	source: string;
@@ -21,328 +18,271 @@ interface CryptoCodeBlockViewProps {
 	plugin: Mikansei;
 }
 
-type DialogAction = "copy" | "preview" | "decrypt";
+interface ContentDraft { text: string; remark: string; language: string }
+interface Session extends ContentDraft { password: string; target: BlockTarget }
 
-const ICON_SIZE = 14;
-
-export function CryptoCodeBlockView(props: CryptoCodeBlockViewProps) {
+export function CryptoCodeBlockView({ source, el, ctx, plugin }: CryptoCodeBlockViewProps) {
 	const { t } = useTranslation();
-	const [decryptedContent, setDecryptedContent] = useState<string | null>(
-		null
+	const id = useId();
+	const encrypted = useMemo(() => isEncryptedContent(source), [source]);
+	const bundle = useMemo(() => readBundle(source), [source]);
+	const [sessionContent, setSessionContent] = useState<ContentDraft | null>(null);
+	const [draft, setDraft] = useState<ContentDraft | null>(null);
+	const [editing, setEditing] = useState(false);
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState("");
+	const [paused, setPaused] = useState(false);
+	const sessionRef = useRef<Session | null>(null);
+	const active = useRef(false);
+	const mounted = useRef(true);
+	const dirtyRef = useRef(false);
+	const activity = useRef(Date.now());
+	const codeRef = useRef<HTMLElement>(null);
+	const translate = useRef(t);
+	translate.current = t;
+	const dirty = !!draft && !!sessionContent && (
+		draft.text !== sessionContent.text || draft.remark !== sessionContent.remark || draft.language !== sessionContent.language
 	);
-	const [decryptedLanguage, setDecryptedLanguage] = useState("text");
-	// 用 ref 保存当前动作，避免对话框回调闭包读到过期的状态值
-	const actionRef = useRef<DialogAction>("copy");
+	dirtyRef.current = dirty;
 
-	const isEncrypted = isEncryptedContent(props.source);
-
-	const remarkInfo = useMemo(() => {
-		if (!isEncrypted) {
-			// 未加密时显示完整内容
-			return props.source;
-		}
-		try {
-			const decodedStr = base64ToString(props.source);
-			const data = JSON.parse(decodedStr) as AesGcmDecryptResult;
-			// 备注支持换行，显示完整内容
-			return data?.remark || t("crypto.remark.empty");
-		} catch {
-			return t("crypto.remark.parseFailed");
-		}
-	}, [props.source, isEncrypted, t]);
-
-	const previewRef = useRef<HTMLDivElement>(null);
 	useEffect(() => {
-		const node = previewRef.current;
-		if (!node || decryptedContent === null) return;
-		node.empty();
-		const markdown =
-			"```" + decryptedLanguage + "\n" + decryptedContent + "\n```";
-		MarkdownRenderer.render(
-			props.plugin.app,
-			markdown,
-			node,
-			props.ctx.sourcePath,
-			props.plugin
-		);
-	}, [decryptedContent, decryptedLanguage, props.ctx.sourcePath, props.plugin]);
+		mounted.current = true;
+		return () => {
+			mounted.current = false;
+			if (dirtyRef.current) new Notice(translate.current("crypto.ui.draftLost"), 8000);
+			sessionRef.current = null;
+		};
+	}, []);
 
-	// 解密到文件
-	async function decryptToFile(decryptedText: string) {
+	const clearSession = useCallback(() => {
+		sessionRef.current = null;
+		dirtyRef.current = false;
+		setSessionContent(null);
+		setDraft(null);
+		setEditing(false);
+		setPaused(false);
+		setError("");
+	}, []);
+
+	useEffect(() => {
+		if (!sessionContent) return;
+		const doc = el.ownerDocument;
+		const check = () => {
+			const decision = autoLockDecision(plugin.settings.cryptoAutoLockMinutes, activity.current, Date.now(), active.current, dirtyRef.current);
+			if (decision === "pause") setPaused(true);
+			if (decision === "lock") clearSession();
+		};
+		const timer = window.setInterval(check, 1000);
+		doc.addEventListener("visibilitychange", check);
+		return () => {
+			window.clearInterval(timer);
+			doc.removeEventListener("visibilitychange", check);
+		};
+	}, [sessionContent, clearSession, el, plugin]);
+
+	useEffect(() => {
+		const node = codeRef.current;
+		if (!node || editing) return;
+		let cancelled = false;
+		void loadPrism().then((prism) => {
+			if (!cancelled && mounted.current && node.isConnected) prism.highlightElement(node);
+		}).catch(() => { /* Plain text remains readable if highlighting is unavailable. */ });
+		return () => { cancelled = true; };
+	}, [sessionContent, editing, source]);
+
+	async function perform(action: () => Promise<void>) {
+		if (active.current) return;
+		active.current = true;
+		setBusy(true);
+		setError("");
+		try { await action(); } catch (failure) {
+			if (mounted.current) setError(cryptoErrorMessage(failure));
+		} finally {
+			active.current = false;
+			activity.current = Date.now();
+			if (mounted.current) setBusy(false);
+		}
+	}
+
+	async function target() {
+		const info = ctx.getSectionInfo(el);
+		if (!info) throw new BlockConflictError();
+		const result = await captureTarget(plugin.app, ctx.sourcePath, info.lineStart, plugin.settings.cryptoBlockLanguage);
+		// Renderer sources can include a final newline; no other differences are accepted.
+		const body = result.snapshot.block.body.replace(/\r\n/g, "\n");
+		if (source !== body && source !== body + "\n") throw new BlockConflictError();
+		return result;
+	}
+
+	async function unlock() {
+		await perform(async () => {
+			const captured = await target();
+			await openCryptoDialog(plugin.app, {
+				mode: "decrypt", title: t("crypto.ui.unlock"), submitLabel: t("crypto.ui.unlock"),
+				onSubmit: async ({ password }) => {
+					const result = await unlockContent(captured.snapshot.block.body, password);
+					if (!mounted.current) throw new BlockConflictError();
+					const content = { text: result.text, remark: result.remark, language: result.language };
+					sessionRef.current = { ...content, password, target: captured };
+					setSessionContent(content);
+					setDraft(content);
+					activity.current = Date.now();
+				},
+			});
+		});
+	}
+
+	async function encrypt() {
+		await perform(async () => {
+			const captured = await target();
+			if (isEncryptedContent(captured.snapshot.block.body)) throw new BlockConflictError();
+			await openCryptoDialog(plugin.app, {
+				mode: "encrypt", title: t("crypto.dialog.encryptTitle"), submitLabel: t("crypto.dialog.submitEncrypt"),
+				description: t("crypto.ui.encryptHint"),
+				onSubmit: async ({ password, remarks, language }) => {
+					const body = await encryptContent(captured.snapshot.block.body, password, remarks, language ?? "text");
+					await writeTarget(plugin.app, captured, body);
+					new Notice(t("crypto.notice.encryptSuccess"));
+				},
+			});
+		});
+	}
+
+	async function save() {
+		const session = sessionRef.current;
+		if (!session || !draft) throw new BlockConflictError();
+		if (safeLanguage(draft.language) !== draft.language) throw new Error();
+		const body = await encryptContent(draft.text, session.password, draft.remark, draft.language);
+		// Successful source replacement can unmount this view synchronously.
+		dirtyRef.current = false;
+		try { await writeTarget(plugin.app, session.target, body); } catch (failure) {
+			dirtyRef.current = dirty;
+			throw failure;
+		}
+		if (mounted.current) clearSession();
+		new Notice(t("crypto.ui.saved"));
+	}
+
+	async function leave(lock: boolean) {
+		await perform(async () => {
+			if (dirty) {
+				const choice = await askDirtyAction(plugin.app);
+				if (choice === "continue") return;
+				if (choice === "save") { await save(); return; }
+			}
+			if (!mounted.current) return;
+			if (lock) clearSession();
+			else { setDraft(sessionContent); setEditing(false); setPaused(false); }
+		});
+	}
+
+	async function changePassword() {
+		await perform(async () => {
+			const session = sessionRef.current;
+			if (!session || dirty) return;
+			await openCryptoDialog(plugin.app, {
+				mode: "change", title: t("crypto.ui.changePassword"), submitLabel: t("crypto.ui.changePassword"),
+				description: t("crypto.ui.passwordHistoryWarning"),
+				onSubmit: async ({ password, oldPassword }) => {
+					const result = await unlockContent(session.target.snapshot.block.body, oldPassword ?? "");
+					const body = await encryptContent(result.text, password, result.remark, result.language);
+					await writeTarget(plugin.app, session.target, body);
+					if (mounted.current) clearSession();
+					new Notice(t("crypto.ui.passwordChanged"));
+				},
+			});
+		});
+	}
+
+	async function permanentlyDecrypt() {
+		await perform(async () => {
+			const session = sessionRef.current;
+			if (!session || dirty) return;
+			if (!await confirmModal(plugin.app, {
+				title: t("crypto.ui.decryptPermanent"), message: t("crypto.ui.permanentWarning"),
+				confirmText: t("crypto.ui.decryptPermanent"), cancelText: t("crypto.ui.cancel"),
+			})) return;
+			await writeTarget(plugin.app, session.target, session.text);
+			if (mounted.current) clearSession();
+			new Notice(t("crypto.notice.decryptToFileSuccess"));
+		});
+	}
+
+	function showMenu(event: React.MouseEvent) {
+		const menu = new Menu();
+		menu.addItem((item) => item.setTitle(t("crypto.ui.changePassword")).setIcon("key-round")
+			.setDisabled(dirty || busy).onClick(() => void changePassword()));
+		menu.addItem((item) => item.setTitle(t("crypto.ui.decryptPermanent")).setIcon("lock-keyhole-open")
+			.setDisabled(dirty || busy).onClick(() => void permanentlyDecrypt()));
+		menu.showAtMouseEvent(event.nativeEvent);
+	}
+
+	async function copy() {
 		try {
-			const file = props.plugin.app.vault.getAbstractFileByPath(
-				props.ctx.sourcePath
-			);
-			if (!file || !(file instanceof TFile)) {
-				throw new Error(t("crypto.error.noFile"));
-			}
-
-			const content = await props.plugin.app.vault.read(file);
-			const lines = content.split("\n");
-
-			// 获取代码块的位置信息
-			const sectionInfo = props.ctx.getSectionInfo(
-				props.el.parentElement!
-			);
-			if (!sectionInfo) {
-				throw new Error(t("crypto.error.noSectionInfo"));
-			}
-
-			const startLine = sectionInfo.lineStart;
-			const endLine = sectionInfo.lineEnd;
-
-			// 替换代码块内容为解密后的明文（保留首尾的```标记）
-			const newLines = [
-				...lines.slice(0, startLine + 1),
-				decryptedText,
-				...lines.slice(endLine),
-			];
-
-			await props.plugin.app.vault.modify(file, newLines.join("\n"));
-			new Notice(t("crypto.notice.decryptToFileSuccess"), 3000);
-		} catch (error) {
-			console.error("解密到文件失败:", error);
-			new Notice(
-				t("crypto.notice.decryptFailedGeneric", {
-					message:
-						error instanceof Error
-							? error.message
-							: t("crypto.error.unknown"),
-				}),
-				5000
-			);
-		}
+			await navigator.clipboard.writeText(editing ? draft?.text ?? "" : sessionContent?.text ?? source);
+			new Notice(t("crypto.notice.copyPlainSuccess"));
+		} catch { setError(t("crypto.ui.copyFailed")); }
 	}
 
-	// 确认解密密码
-	async function confirmPassword(passwordInput: string) {
-		if (!passwordInput.trim()) return;
-
-		try {
-			const result = await decryptAesGcm(props.source, passwordInput);
-
-			if (actionRef.current === "copy") {
-				await navigator.clipboard.writeText(result.text);
-				new Notice(t("crypto.notice.copyDecryptedSuccess"), 2000);
-			} else if (actionRef.current === "preview") {
-				setDecryptedContent(result.text);
-				setDecryptedLanguage(result.language || "text");
-			} else if (actionRef.current === "decrypt") {
-				// 解密到源文件
-				await decryptToFile(result.text);
-			}
-		} catch {
-			new Notice(t("crypto.notice.decryptFailedWrongPassword"), 5000);
-		}
-	}
-
-	// 确认加密
-	async function confirmEncrypt(
-		encryptPasswordInput: string,
-		encryptRemarkInput: string,
-		encryptLanguageInput?: string
-	) {
-		try {
-			// 获取要加密的内容
-			const contentToEncrypt = decryptedContent || props.source;
-
-			// 执行加密
-			const encryptedObj = await encryptAesGcm(
-				contentToEncrypt,
-				encryptPasswordInput,
-				encryptRemarkInput,
-				encryptLanguageInput || "text"
-			);
-			const encryptedContent = stringToBase64(JSON.stringify(encryptedObj));
-
-			// 修改源文件
-			const file = props.plugin.app.vault.getAbstractFileByPath(
-				props.ctx.sourcePath
-			);
-			if (!file || !(file instanceof TFile)) {
-				throw new Error(t("crypto.error.noFile"));
-			}
-
-			const content = await props.plugin.app.vault.read(file);
-			const lines = content.split("\n");
-
-			// 获取代码块的位置信息
-			const sectionInfo = props.ctx.getSectionInfo(
-				props.el.parentElement!
-			);
-			if (!sectionInfo) {
-				throw new Error(t("crypto.error.noSectionInfo"));
-			}
-
-			const startLine = sectionInfo.lineStart;
-			const endLine = sectionInfo.lineEnd;
-
-			// 替换代码块内容（保留首尾的```标记）
-			const newLines = [
-				...lines.slice(0, startLine + 1),
-				encryptedContent,
-				...lines.slice(endLine),
-			];
-
-			await props.plugin.app.vault.modify(file, newLines.join("\n"));
-
-			// 重置状态
-			setDecryptedContent(null);
-			setDecryptedLanguage("text");
-		} catch (error) {
-			console.error("加密失败:", error);
-			new Notice(
-				t("crypto.notice.encryptFailedGeneric", {
-					message:
-						error instanceof Error
-							? error.message
-							: t("crypto.error.unknown"),
-				}),
-				5000
-			);
-		}
-	}
-
-	// 处理复制
-	async function handleCopy() {
-		if (!isEncrypted) {
-			await navigator.clipboard.writeText(props.source);
-			new Notice(t("crypto.notice.copyPlainSuccess"), 2000);
-			return;
-		}
-		actionRef.current = "copy";
-		const data = await openCryptoDialog(props.plugin.app, "decrypt");
-		if (!data) return;
-		await confirmPassword(data.password);
-	}
-
-	// 处理预览
-	async function handlePreview() {
-		if (!isEncrypted) {
-			setDecryptedContent(props.source);
-			return;
-		}
-		actionRef.current = "preview";
-		const data = await openCryptoDialog(props.plugin.app, "decrypt");
-		if (!data) return;
-		await confirmPassword(data.password);
-	}
-
-	// 处理加密
-	async function handleEncrypt() {
-		const data = await openCryptoDialog(props.plugin.app, "encrypt");
-		if (!data) return;
-		await confirmEncrypt(data.password, data.remarks, data.language);
-	}
-
-	// 处理解密
-	async function handleDecrypt() {
-		actionRef.current = "decrypt";
-		const data = await openCryptoDialog(props.plugin.app, "decrypt");
-		if (!data) return;
-		await confirmPassword(data.password);
-	}
-
-	// 关闭预览
-	function closePreview() {
-		setDecryptedContent(null);
-		setDecryptedLanguage("text");
-	}
-
-	const previewMaxHeight = props.plugin.settings.cryptoBlockHeight + "px";
-
+	const language = sessionContent?.language ?? "text";
 	return (
-		<div className="crypto-code-block">
-			{/* 状态指示器 */}
-			<div
-				className={
-					isEncrypted
-						? "status-indicator encrypted"
-						: "status-indicator"
-				}
-				title={
-					isEncrypted
-						? t("crypto.status.encrypted")
-						: t("crypto.status.unencrypted")
-				}
-			></div>
-
-			{/* 内容区域 */}
-			<div className="content-area">
-				{decryptedContent !== null ? (
-					<div className="decrypted-preview">
-						<div className="preview-header">
-							<div className="language-name">
-								{decryptedLanguage}
-							</div>
-							<div className="action-buttons">
-								<div
-									aria-label={t("crypto.action.closePreview")}
-									role="button"
-									className="btn"
-									onClick={closePreview}
-									tabIndex={0}
-								>
-									<X size={ICON_SIZE} />
-								</div>
-							</div>
-						</div>
-						<div
-							ref={previewRef}
-							className="preview-content markdown-preview-view"
-							style={{ maxHeight: previewMaxHeight }}
-						></div>
-					</div>
-				) : (
-					<div className="remark-text" style={{ maxHeight: previewMaxHeight }}>
-						{remarkInfo}
-					</div>
-				)}
-			</div>
-
-			<div className="crypto-code-block-footer">
-				<div className="action-buttons">
-					{isEncrypted && (
-						<div
-							aria-label={t("crypto.action.decrypt")}
-							role="button"
-							className="btn"
-							onClick={handleDecrypt}
-							tabIndex={0}
-						>
-							<LockKeyholeOpen size={ICON_SIZE} />
-						</div>
-					)}
-
-					<div
-						aria-label={t("crypto.action.encrypt")}
-						role="button"
-						className="btn"
-						onClick={handleEncrypt}
-						tabIndex={0}
-					>
-						<KeyRound size={ICON_SIZE} />
-					</div>
-					<div
-						aria-label={t("crypto.action.preview")}
-						role="button"
-						className="btn"
-						onClick={handlePreview}
-						tabIndex={0}
-					>
-						<Eye size={ICON_SIZE} />
-					</div>
-					<div
-						aria-label={t("crypto.action.copy")}
-						role="button"
-						className="btn"
-						onClick={handleCopy}
-						tabIndex={0}
-					>
-						<Copy size={ICON_SIZE} />
-					</div>
+		<div className="crypto-code-block" aria-busy={busy}
+			onPointerDown={() => { activity.current = Date.now(); }}
+			onKeyDown={() => { activity.current = Date.now(); }}
+			onScrollCapture={() => { activity.current = Date.now(); }}>
+			<header className="crypto-block-header">
+				<div className="crypto-block-status">
+					{sessionContent || !encrypted ? <LockKeyholeOpen size={16} /> : <LockKeyhole size={16} />}
+					<span>{t(sessionContent ? "crypto.ui.unlocked" : encrypted ? "crypto.status.encrypted" : "crypto.status.unencrypted")}</span>
 				</div>
-			</div>
+				{sessionContent && <div className="crypto-toolbar">
+					<button disabled={busy} onClick={() => void leave(true)}><LockKeyhole size={14} />{t("crypto.ui.lock")}</button>
+					<button className="crypto-icon-button" disabled={busy} onClick={showMenu} aria-label={t("crypto.ui.more")} title={t("crypto.ui.more")}><Ellipsis size={18} /></button>
+				</div>}
+			</header>
+			{sessionContent && <p className="crypto-session-hint">{t("crypto.ui.sessionOnly")}</p>}
+			{editing && draft ? <div className="crypto-edit-area">
+				<label htmlFor={`${id}-text`}>{t("crypto.ui.content")}</label>
+				<textarea id={`${id}-text`} className="crypto-editor" value={draft.text} autoFocus spellCheck={false}
+					disabled={busy} onChange={(event) => setDraft({ ...draft, text: event.target.value })}
+					onKeyDown={(event) => {
+						if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) {
+							event.preventDefault();
+							void perform(save);
+						}
+					}} />
+				<label htmlFor={`${id}-remark`}>{t("crypto.ui.remarkLabel")}</label>
+				<textarea id={`${id}-remark`} rows={2} disabled={busy} value={draft.remark}
+					onChange={(event) => setDraft({ ...draft, remark: event.target.value })} />
+				<p className="crypto-help">{t("crypto.ui.remarkPublic")}</p>
+				<label htmlFor={`${id}-lang`}>{t("crypto.dialog.language")}</label>
+				<input id={`${id}-lang`} disabled={busy} value={draft.language} spellCheck={false} autoCapitalize="none"
+					onChange={(event) => setDraft({ ...draft, language: event.target.value })} />
+				{draft.language !== safeLanguage(draft.language) && <p className="crypto-error">{t("crypto.ui.languageInvalid")}</p>}
+				<p className="crypto-help">{t("crypto.ui.editMemoryHint")}</p>
+			</div> : encrypted && !sessionContent ? <div className="crypto-locked-content">
+				<p className="crypto-remark">{bundle?.remark || t("crypto.ui.lockedHint")}</p>
+				{bundle?.remark && <p className="crypto-help">{t("crypto.ui.publicRemark")}</p>}
+				{!bundle && <p className="crypto-error">{t("crypto.notice.decryptFailedBadFormat")}</p>}
+			</div> : <pre className="crypto-code-preview" style={{ maxHeight: plugin.settings.cryptoBlockHeight }}>
+				<code key={`${language}-${!!sessionContent}`} ref={codeRef} className={`language-${language}`}>{sessionContent?.text ?? source}</code>
+			</pre>}
+			{error && <p className="crypto-error crypto-inline-message" role="alert">{error}</p>}
+			{paused && dirty && <p className="crypto-warning crypto-inline-message" role="status">{t("crypto.ui.lockPaused")}</p>}
+			<footer className="crypto-block-footer">
+				<span className="crypto-footer-label">{editing ? t(dirty ? "crypto.ui.unsaved" : "crypto.ui.editing") : sessionContent ? language : ""}</span>
+				<div className="crypto-toolbar">
+					{(!encrypted || sessionContent) && <button disabled={busy} onClick={() => void copy()}><Copy size={14} />{t("crypto.action.copy")}</button>}
+					{editing ? <>
+						<button disabled={busy} onClick={() => void leave(false)}>{t("crypto.ui.cancel")}</button>
+						<button className="mod-cta" disabled={busy || !dirty || draft?.language !== safeLanguage(draft?.language ?? "")}
+							onClick={() => void perform(save)}>{t(busy ? "crypto.ui.processing" : "crypto.ui.saveEncrypted")}</button>
+					</> : sessionContent ? <button disabled={busy} onClick={() => { setDraft(sessionContent); setEditing(true); }}><Pencil size={14} />{t("crypto.ui.edit")}</button>
+						: <button className="mod-cta" disabled={busy || (encrypted && !bundle)} onClick={() => void (encrypted ? unlock() : encrypt())}>
+							<LockKeyhole size={14} />{t(busy ? "crypto.ui.processing" : encrypted ? "crypto.ui.unlock" : "crypto.action.encrypt")}
+						</button>}
+				</div>
+			</footer>
 		</div>
 	);
 }
