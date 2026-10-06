@@ -1,59 +1,118 @@
+// Keep the original compact shell. The rendered preview belongs to Obsidian/plugins.
 .crypto-code-block {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	padding: 0;
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
 	background: var(--background-primary);
 	overflow: hidden;
-	color: var(--text-normal);
-	font-family: var(--font-interface);
-	font-size: var(--font-ui-small);
 	min-width: 0;
+	transition: border-color 0.2s ease, box-shadow 0.2s ease;
 
-	.crypto-block-header,
-	.crypto-block-footer {
+	&:hover {
+		border-color: var(--interactive-accent);
+		box-shadow: 0 0 0 1px var(--interactive-accent);
+	}
+
+	> .status-indicator {
+		position: absolute;
+		top: 8px;
+		left: 8px;
+		width: 8px;
+		height: 8px;
+		border-radius: 50%;
+		background: #ff9800;
+		box-shadow: 0 0 0 2px var(--background-primary), 0 0 0 3px rgba(255, 152, 0, 0.3);
+		z-index: 2;
+		&.encrypted {
+			background: #44cf6e;
+			box-shadow: 0 0 0 2px var(--background-primary), 0 0 0 3px rgba(68, 207, 110, 0.3);
+		}
+	}
+
+	> .content-area {
+		padding: 20px 20px 4px;
+		min-height: 40px;
+		background: var(--background-primary);
+
+		> .remark-text {
+			padding: 12px 8px;
+			color: var(--text-muted);
+			font-size: 14px;
+			line-height: 1.6;
+			word-break: break-word;
+			white-space: pre-wrap;
+			overflow-y: auto;
+			border: 1px solid var(--background-modifier-border);
+		}
+
+		> .decrypted-preview {
+			border: 1px solid var(--background-modifier-border);
+			border-radius: var(--radius-s);
+			overflow: hidden;
+			margin-top: 8px;
+			position: relative;
+
+			> .preview-content {
+				margin: 4px 0 0;
+				padding: 0 4px;
+				overflow: auto;
+				// No pre/code/button/font overrides: allow code block processors to own their output.
+			}
+		}
+	}
+
+	> .crypto-code-block-footer {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
-		gap: 8px;
-		padding: 8px 12px;
-		background: var(--background-secondary);
+		min-height: 30px;
 		flex-wrap: wrap;
+		background: var(--background-secondary);
+		> .crypto-footer-label { padding: 4px 8px; color: var(--text-muted); font-size: var(--font-ui-smaller); }
 	}
-	.crypto-block-header { border-bottom: 1px solid var(--background-modifier-border); }
-	.crypto-block-footer { border-top: 1px solid var(--background-modifier-border); }
-	.crypto-block-status { display: flex; align-items: center; gap: 8px; font-weight: 600; }
-	.crypto-footer-label { color: var(--text-muted); }
-	.crypto-toolbar { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-left: auto; }
-	button { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; }
-	.crypto-session-hint { margin: 10px 14px 0; color: var(--text-muted); font-size: var(--font-ui-smaller); }
-	.crypto-locked-content { padding: 18px 16px; }
-	.crypto-remark { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 160px; overflow: auto; }
-	pre.crypto-code-preview {
-		margin: 0;
-		padding: 16px;
-		border: 0;
-		border-radius: 0;
-		background: var(--code-background);
-		overflow: auto;
-		white-space: pre;
-		font-family: var(--font-monospace);
-		font-size: var(--code-size);
-		line-height: 1.6;
-		code { padding: 0; background: none; font: inherit; white-space: inherit; }
+	> .crypto-inline-message { margin: 10px 20px; }
+}
+
+// Only our toolbar, never buttons generated inside a rendered preview.
+.crypto-code-block > .crypto-code-block-footer > .action-buttons {
+	display: flex;
+	gap: 4px;
+	justify-content: flex-end;
+	align-items: center;
+	padding: 4px;
+	background: var(--background-secondary);
+	flex: 1;
+	flex-wrap: wrap;
+	> .btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 24px;
+		height: 24px;
+		padding: 4px;
+		border-radius: var(--radius-s);
+		color: var(--text-muted);
+		background: transparent;
+		border: none;
+		box-shadow: none;
+		cursor: pointer;
+		&:hover:not(:disabled) { background: var(--background-modifier-hover); color: var(--text-normal); }
+		&:disabled { opacity: 0.5; cursor: not-allowed; }
 	}
-	.crypto-edit-area {
-		padding: 14px;
-		display: flex;
-		flex-direction: column;
-		gap: 8px;
-		label { font-weight: 500; }
-		input, textarea { width: 100%; }
-		textarea { resize: vertical; }
-		.crypto-editor { min-height: 220px; font-family: var(--font-monospace); line-height: 1.6; tab-size: 4; }
-	}
-	.crypto-inline-message { margin: 10px 14px; }
+	> button:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; }
 }
 
 .nya-crypto-modal { width: min(480px, calc(100vw - 24px)); }
+.nya-crypto-edit-modal { width: min(760px, calc(100vw - 24px)); }
+.nya-crypto-edit-form > .crypto-field > .crypto-editor {
+	height: clamp(180px, 38vh, 420px);
+	min-height: 160px;
+	font-family: var(--font-monospace);
+	line-height: 1.6;
+	tab-size: 4;
+}
 .nya-crypto-form {
 	display: flex;
 	flex-direction: column;
@@ -71,21 +130,56 @@
 		button { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); }
 	}
 	.crypto-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
-}
-
-.crypto-code-block, .nya-crypto-form {
-	button:focus-visible, input:focus-visible, textarea:focus-visible {
-		outline: 2px solid var(--interactive-accent);
-		outline-offset: 2px;
-	}
+	button:focus-visible { outline: 2px solid var(--interactive-accent); outline-offset: 2px; }
 	.crypto-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; background: transparent; box-shadow: none; }
 	.crypto-help { margin: 0; font-size: var(--font-ui-smaller); line-height: 1.5; color: var(--text-muted); }
+}
+
+// Exactly one field border. Do not stack outlines/shadows over Obsidian's theme focus.
+// Structural selectors deliberately exclude third-party rendered preview controls.
+.nya-crypto-form > .crypto-field > input,
+.nya-crypto-form > .crypto-field > textarea,
+.nya-crypto-form > .crypto-field > .crypto-password-input > input {
+	box-sizing: border-box;
+	min-width: 0;
+	max-width: 100%;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: 6px 10px;
+	font-size: var(--font-ui-medium);
+	outline: none;
+	box-shadow: none;
+	&:focus, &:focus-visible {
+		border-color: var(--interactive-accent);
+		outline: none;
+		box-shadow: none;
+	}
+	&[aria-invalid="true"] { border-color: var(--text-error); }
+}
+.nya-crypto-form > .crypto-field > input,
+.nya-crypto-form > .crypto-field > .crypto-password-input > input {
+	height: var(--input-height, 32px);
+	line-height: normal;
+}
+.nya-crypto-form > .crypto-field > .crypto-password-input > input { padding-right: 40px; }
+.nya-crypto-form > .crypto-field > input.crypto-language-input {
+	width: 180px;
+	max-width: 100%;
+	align-self: flex-start;
 }
 .crypto-error { color: var(--text-error); font-size: var(--font-ui-small); line-height: 1.5; margin: 0; }
 .crypto-warning { color: var(--text-warning); font-size: var(--font-ui-small); line-height: 1.5; }
 
+@media (pointer: coarse) {
+	.crypto-code-block > .crypto-code-block-footer > .action-buttons > .btn {
+		width: 36px;
+		height: 36px;
+	}
+}
 @media (max-width: 480px) {
-	.crypto-code-block button, .nya-crypto-form button { min-height: 40px; }
-	.crypto-code-block .crypto-toolbar { gap: 4px; }
-	.crypto-code-block .crypto-edit-area .crypto-editor { min-height: 160px; }
+	.nya-crypto-form button { min-height: 40px; }
+	.crypto-code-block > .content-area { padding: 20px 12px 4px; }
+}
+@media (prefers-reduced-motion: reduce) {
+	.crypto-code-block { transition: none; }
 }

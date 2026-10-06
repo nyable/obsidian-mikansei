@@ -19,11 +19,13 @@ const en = {
 	},
 	crypto: {
 		ui: {
+			previewFailed: "Preview rendering failed. Check the code block plugin, copy the content, or reopen the preview.",
 			unlock: "Unlock to view",
 			unlocked: "Unlocked",
 			lock: "Lock",
 			more: "More actions",
 			edit: "Edit",
+			editTitle: "Edit encrypted code block",
 			editing: "Editing",
 			content: "Content",
 			cancel: "Cancel",
@@ -40,7 +42,7 @@ const en = {
 			lockedHint: "Content is encrypted. Enter the password to view it.",
 			unlockHint: "Unlocking is temporary and does not write plaintext to your note.",
 			encryptHint: "Encrypt this block with a password. Passwords cannot be recovered; keep yours safe.",
-			editMemoryHint: "Drafts stay in this view's memory only. Closing the note, switching modes, or quitting can lose unsaved changes. Ctrl/Cmd + Enter saves encrypted.",
+			editMemoryHint: "Auto-lock is paused while editing. Drafts stay in memory only and are cleared when the note closes or the app quits. Ctrl/Cmd + Enter saves encrypted.",
 			remarkLabel: "Public remark (optional)",
 			remarkPublic: "Remarks are not encrypted. Do not include sensitive information.",
 			publicRemark: "Public remark",

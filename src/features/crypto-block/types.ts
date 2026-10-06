@@ -1,3 +1,9 @@
+export interface CryptoContentDraft {
+	text: string;
+	remark: string;
+	language: string;
+}
+
 export interface CryptoConfirmData {
 	password: string;
 	remarks: string;

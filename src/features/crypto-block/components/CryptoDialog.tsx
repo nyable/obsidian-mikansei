@@ -81,7 +81,7 @@ export function CryptoDialog({ options, onSuccess, onCancel }: {
 						<p id={`${id}-remark-help`} className="crypto-help">{t("crypto.ui.remarkPublic")}</p>
 					</div>
 					<div className="crypto-field"><label htmlFor={`${id}-language`}>{t("crypto.dialog.language")}</label>
-						<input id={`${id}-language`} value={language} disabled={busy} autoCapitalize="none" spellCheck={false}
+						<input type="text" className="crypto-language-input" id={`${id}-language`} value={language} disabled={busy} autoCapitalize="none" spellCheck={false}
 							onChange={(event) => setLanguage(event.target.value)} />
 					</div>
 				</>}

@@ -1,15 +1,18 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { loadPrism, Menu, Notice, type MarkdownPostProcessorContext } from "obsidian";
-import { Copy, Ellipsis, LockKeyhole, LockKeyholeOpen, Pencil } from "lucide-react";
+import { Menu, Notice, type MarkdownPostProcessorContext } from "obsidian";
+import { Copy, Ellipsis, Eye, KeyRound, LockKeyhole, LockKeyholeOpen, Pencil, X } from "lucide-react";
 import type Mikansei from "src/main";
 import { confirmModal } from "src/shared/confirmModal";
-import { askDirtyAction, openCryptoDialog } from "../CryptoConfirmModal";
+import { openCryptoDialog } from "../CryptoConfirmModal";
+import { openCryptoEditor, type CryptoEditorHandle } from "../CryptoEditModal";
+import type { CryptoContentDraft } from "../types";
 import { isEncryptedContent } from "../crypto";
 import { captureTarget, writeTarget, type BlockTarget } from "../blockStorage";
 import { BlockConflictError } from "../blockContent";
-import { cryptoErrorMessage, encryptContent, readBundle, safeLanguage, unlockContent } from "../cryptoService";
+import { cryptoErrorMessage, encryptContent, readBundle, unlockContent } from "../cryptoService";
 import { autoLockDecision } from "../autoLock";
+import { renderCryptoPreview } from "../previewRendering";
 
 interface CryptoCodeBlockViewProps {
 	source: string;
@@ -18,49 +21,39 @@ interface CryptoCodeBlockViewProps {
 	plugin: Mikansei;
 }
 
-interface ContentDraft { text: string; remark: string; language: string }
-interface Session extends ContentDraft { password: string; target: BlockTarget }
+interface Session extends CryptoContentDraft { password: string; target: BlockTarget }
 
 export function CryptoCodeBlockView({ source, el, ctx, plugin }: CryptoCodeBlockViewProps) {
 	const { t } = useTranslation();
-	const id = useId();
 	const encrypted = useMemo(() => isEncryptedContent(source), [source]);
 	const bundle = useMemo(() => readBundle(source), [source]);
-	const [sessionContent, setSessionContent] = useState<ContentDraft | null>(null);
-	const [draft, setDraft] = useState<ContentDraft | null>(null);
-	const [editing, setEditing] = useState(false);
+	const [sessionContent, setSessionContent] = useState<CryptoContentDraft | null>(null);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
-	const [paused, setPaused] = useState(false);
+	const [plainPreview, setPlainPreview] = useState(false);
+	const [editing, setEditing] = useState(false);
 	const sessionRef = useRef<Session | null>(null);
+	const editorRef = useRef<CryptoEditorHandle | null>(null);
 	const active = useRef(false);
 	const mounted = useRef(true);
-	const dirtyRef = useRef(false);
 	const activity = useRef(Date.now());
-	const codeRef = useRef<HTMLElement>(null);
+	const previewRef = useRef<HTMLDivElement>(null);
 	const translate = useRef(t);
 	translate.current = t;
-	const dirty = !!draft && !!sessionContent && (
-		draft.text !== sessionContent.text || draft.remark !== sessionContent.remark || draft.language !== sessionContent.language
-	);
-	dirtyRef.current = dirty;
 
 	useEffect(() => {
 		mounted.current = true;
 		return () => {
 			mounted.current = false;
-			if (dirtyRef.current) new Notice(translate.current("crypto.ui.draftLost"), 8000);
+			editorRef.current?.dispose();
+			editorRef.current = null;
 			sessionRef.current = null;
 		};
 	}, []);
 
 	const clearSession = useCallback(() => {
 		sessionRef.current = null;
-		dirtyRef.current = false;
 		setSessionContent(null);
-		setDraft(null);
-		setEditing(false);
-		setPaused(false);
 		setError("");
 	}, []);
 
@@ -68,8 +61,7 @@ export function CryptoCodeBlockView({ source, el, ctx, plugin }: CryptoCodeBlock
 		if (!sessionContent) return;
 		const doc = el.ownerDocument;
 		const check = () => {
-			const decision = autoLockDecision(plugin.settings.cryptoAutoLockMinutes, activity.current, Date.now(), active.current, dirtyRef.current);
-			if (decision === "pause") setPaused(true);
+			const decision = autoLockDecision(plugin.settings.cryptoAutoLockMinutes, activity.current, Date.now(), active.current, false);
 			if (decision === "lock") clearSession();
 		};
 		const timer = window.setInterval(check, 1000);
@@ -81,14 +73,19 @@ export function CryptoCodeBlockView({ source, el, ctx, plugin }: CryptoCodeBlock
 	}, [sessionContent, clearSession, el, plugin]);
 
 	useEffect(() => {
-		const node = codeRef.current;
-		if (!node || editing) return;
+		const node = previewRef.current;
+		if (!node || (!sessionContent && !plainPreview)) return;
 		let cancelled = false;
-		void loadPrism().then((prism) => {
-			if (!cancelled && mounted.current && node.isConnected) prism.highlightElement(node);
-		}).catch(() => { /* Plain text remains readable if highlighting is unavailable. */ });
-		return () => { cancelled = true; };
-	}, [sessionContent, editing, source]);
+		const preview = renderCryptoPreview(plugin.app, plugin, node, ctx.sourcePath,
+			sessionContent?.text ?? source, sessionContent?.language ?? "text");
+		void preview.finished.catch(() => {
+			if (!cancelled) {
+				preview.dispose();
+				setError(translate.current("crypto.ui.previewFailed"));
+			}
+		});
+		return () => { cancelled = true; preview.dispose(); };
+	}, [sessionContent, plainPreview, source, ctx.sourcePath, plugin]);
 
 	async function perform(action: () => Promise<void>) {
 		if (active.current) return;
@@ -125,7 +122,6 @@ export function CryptoCodeBlockView({ source, el, ctx, plugin }: CryptoCodeBlock
 					const content = { text: result.text, remark: result.remark, language: result.language };
 					sessionRef.current = { ...content, password, target: captured };
 					setSessionContent(content);
-					setDraft(content);
 					activity.current = Date.now();
 				},
 			});
@@ -148,38 +144,33 @@ export function CryptoCodeBlockView({ source, el, ctx, plugin }: CryptoCodeBlock
 		});
 	}
 
-	async function save() {
-		const session = sessionRef.current;
-		if (!session || !draft) throw new BlockConflictError();
-		if (safeLanguage(draft.language) !== draft.language) throw new Error();
-		const body = await encryptContent(draft.text, session.password, draft.remark, draft.language);
-		// Successful source replacement can unmount this view synchronously.
-		dirtyRef.current = false;
-		try { await writeTarget(plugin.app, session.target, body); } catch (failure) {
-			dirtyRef.current = dirty;
-			throw failure;
-		}
-		if (mounted.current) clearSession();
-		new Notice(t("crypto.ui.saved"));
-	}
-
-	async function leave(lock: boolean) {
+	async function edit() {
 		await perform(async () => {
-			if (dirty) {
-				const choice = await askDirtyAction(plugin.app);
-				if (choice === "continue") return;
-				if (choice === "save") { await save(); return; }
+			const session = sessionRef.current;
+			if (!session || !mounted.current) return;
+			const editor = openCryptoEditor(plugin.app, {
+				text: session.text, remark: session.remark, language: session.language,
+			}, async (draft) => {
+				if (!mounted.current || sessionRef.current !== session) throw new BlockConflictError();
+				const body = await encryptContent(draft.text, session.password, draft.remark, draft.language);
+				if (!mounted.current || sessionRef.current !== session) throw new BlockConflictError();
+				await writeTarget(plugin.app, session.target, body);
+				if (mounted.current) clearSession();
+				new Notice(t("crypto.ui.saved"));
+			});
+			editorRef.current = editor;
+			setEditing(true);
+			try { await editor.finished; } finally {
+				editorRef.current = null;
+				if (mounted.current) setEditing(false);
 			}
-			if (!mounted.current) return;
-			if (lock) clearSession();
-			else { setDraft(sessionContent); setEditing(false); setPaused(false); }
 		});
 	}
 
 	async function changePassword() {
 		await perform(async () => {
 			const session = sessionRef.current;
-			if (!session || dirty) return;
+			if (!session) return;
 			await openCryptoDialog(plugin.app, {
 				mode: "change", title: t("crypto.ui.changePassword"), submitLabel: t("crypto.ui.changePassword"),
 				description: t("crypto.ui.passwordHistoryWarning"),
@@ -197,90 +188,88 @@ export function CryptoCodeBlockView({ source, el, ctx, plugin }: CryptoCodeBlock
 	async function permanentlyDecrypt() {
 		await perform(async () => {
 			const session = sessionRef.current;
-			if (!session || dirty) return;
-			if (!await confirmModal(plugin.app, {
-				title: t("crypto.ui.decryptPermanent"), message: t("crypto.ui.permanentWarning"),
-				confirmText: t("crypto.ui.decryptPermanent"), cancelText: t("crypto.ui.cancel"),
-			})) return;
-			await writeTarget(plugin.app, session.target, session.text);
-			if (mounted.current) clearSession();
-			new Notice(t("crypto.notice.decryptToFileSuccess"));
+			const finish = async (captured: BlockTarget, text: string) => {
+				if (!mounted.current) throw new BlockConflictError();
+				await writeTarget(plugin.app, captured, text);
+				if (mounted.current) clearSession();
+				new Notice(t("crypto.notice.decryptToFileSuccess"));
+			};
+			if (session) {
+				if (!await confirmModal(plugin.app, {
+					title: t("crypto.ui.decryptPermanent"), message: t("crypto.ui.permanentWarning"),
+					confirmText: t("crypto.ui.decryptPermanent"), cancelText: t("crypto.ui.cancel"),
+				})) return;
+				await finish(session.target, session.text);
+			} else {
+				const captured = await target();
+				await openCryptoDialog(plugin.app, {
+					mode: "decrypt", title: t("crypto.ui.decryptPermanent"), submitLabel: t("crypto.ui.decryptPermanent"),
+					description: t("crypto.ui.permanentWarning"),
+					onSubmit: async ({ password }) => {
+						const result = await unlockContent(captured.snapshot.block.body, password);
+						await finish(captured, result.text);
+					},
+				});
+			}
 		});
 	}
 
 	function showMenu(event: React.MouseEvent) {
 		const menu = new Menu();
 		menu.addItem((item) => item.setTitle(t("crypto.ui.changePassword")).setIcon("key-round")
-			.setDisabled(dirty || busy).onClick(() => void changePassword()));
-		menu.addItem((item) => item.setTitle(t("crypto.ui.decryptPermanent")).setIcon("lock-keyhole-open")
-			.setDisabled(dirty || busy).onClick(() => void permanentlyDecrypt()));
+			.setDisabled(busy).onClick(() => void changePassword()));
 		menu.showAtMouseEvent(event.nativeEvent);
 	}
 
 	async function copy() {
 		try {
-			await navigator.clipboard.writeText(editing ? draft?.text ?? "" : sessionContent?.text ?? source);
+			await navigator.clipboard.writeText(sessionContent?.text ?? source);
 			new Notice(t("crypto.notice.copyPlainSuccess"));
 		} catch { setError(t("crypto.ui.copyFailed")); }
 	}
 
-	const language = sessionContent?.language ?? "text";
+	const showingPreview = !!sessionContent || plainPreview;
+	const statusLabel = t(sessionContent ? "crypto.ui.unlocked" : encrypted ? "crypto.status.encrypted" : "crypto.status.unencrypted");
 	return (
 		<div className="crypto-code-block" aria-busy={busy}
 			onPointerDown={() => { activity.current = Date.now(); }}
 			onKeyDown={() => { activity.current = Date.now(); }}
 			onScrollCapture={() => { activity.current = Date.now(); }}>
-			<header className="crypto-block-header">
-				<div className="crypto-block-status">
-					{sessionContent || !encrypted ? <LockKeyholeOpen size={16} /> : <LockKeyhole size={16} />}
-					<span>{t(sessionContent ? "crypto.ui.unlocked" : encrypted ? "crypto.status.encrypted" : "crypto.status.unencrypted")}</span>
-				</div>
-				{sessionContent && <div className="crypto-toolbar">
-					<button disabled={busy} onClick={() => void leave(true)}><LockKeyhole size={14} />{t("crypto.ui.lock")}</button>
-					<button className="crypto-icon-button" disabled={busy} onClick={showMenu} aria-label={t("crypto.ui.more")} title={t("crypto.ui.more")}><Ellipsis size={18} /></button>
-				</div>}
-			</header>
-			{sessionContent && <p className="crypto-session-hint">{t("crypto.ui.sessionOnly")}</p>}
-			{editing && draft ? <div className="crypto-edit-area">
-				<label htmlFor={`${id}-text`}>{t("crypto.ui.content")}</label>
-				<textarea id={`${id}-text`} className="crypto-editor" value={draft.text} autoFocus spellCheck={false}
-					disabled={busy} onChange={(event) => setDraft({ ...draft, text: event.target.value })}
-					onKeyDown={(event) => {
-						if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.nativeEvent.isComposing) {
-							event.preventDefault();
-							void perform(save);
-						}
-					}} />
-				<label htmlFor={`${id}-remark`}>{t("crypto.ui.remarkLabel")}</label>
-				<textarea id={`${id}-remark`} rows={2} disabled={busy} value={draft.remark}
-					onChange={(event) => setDraft({ ...draft, remark: event.target.value })} />
-				<p className="crypto-help">{t("crypto.ui.remarkPublic")}</p>
-				<label htmlFor={`${id}-lang`}>{t("crypto.dialog.language")}</label>
-				<input id={`${id}-lang`} disabled={busy} value={draft.language} spellCheck={false} autoCapitalize="none"
-					onChange={(event) => setDraft({ ...draft, language: event.target.value })} />
-				{draft.language !== safeLanguage(draft.language) && <p className="crypto-error">{t("crypto.ui.languageInvalid")}</p>}
-				<p className="crypto-help">{t("crypto.ui.editMemoryHint")}</p>
-			</div> : encrypted && !sessionContent ? <div className="crypto-locked-content">
-				<p className="crypto-remark">{bundle?.remark || t("crypto.ui.lockedHint")}</p>
-				{bundle?.remark && <p className="crypto-help">{t("crypto.ui.publicRemark")}</p>}
-				{!bundle && <p className="crypto-error">{t("crypto.notice.decryptFailedBadFormat")}</p>}
-			</div> : <pre className="crypto-code-preview" style={{ maxHeight: plugin.settings.cryptoBlockHeight }}>
-				<code key={`${language}-${!!sessionContent}`} ref={codeRef} className={`language-${language}`}>{sessionContent?.text ?? source}</code>
-			</pre>}
+			<div className={`status-indicator${encrypted && !sessionContent ? " encrypted" : ""}`}
+				role="img" aria-label={statusLabel} title={sessionContent ? `${statusLabel}: ${t("crypto.ui.sessionOnly")}` : statusLabel} />
+			<div className="content-area">
+			{showingPreview ? <div className="decrypted-preview">
+				<div ref={previewRef} className="preview-content markdown-preview-view" style={{ maxHeight: plugin.settings.cryptoBlockHeight }} />
+			</div> : <div className="remark-text" style={{ maxHeight: plugin.settings.cryptoBlockHeight }}>
+				{encrypted ? bundle?.remark || t("crypto.remark.empty") : source}
+			</div>}
+			{encrypted && !bundle && <p className="crypto-error crypto-inline-message">{t("crypto.notice.decryptFailedBadFormat")}</p>}
+			</div>
 			{error && <p className="crypto-error crypto-inline-message" role="alert">{error}</p>}
-			{paused && dirty && <p className="crypto-warning crypto-inline-message" role="status">{t("crypto.ui.lockPaused")}</p>}
-			<footer className="crypto-block-footer">
-				<span className="crypto-footer-label">{editing ? t(dirty ? "crypto.ui.unsaved" : "crypto.ui.editing") : sessionContent ? language : ""}</span>
-				<div className="crypto-toolbar">
-					{(!encrypted || sessionContent) && <button disabled={busy} onClick={() => void copy()}><Copy size={14} />{t("crypto.action.copy")}</button>}
-					{editing ? <>
-						<button disabled={busy} onClick={() => void leave(false)}>{t("crypto.ui.cancel")}</button>
-						<button className="mod-cta" disabled={busy || !dirty || draft?.language !== safeLanguage(draft?.language ?? "")}
-							onClick={() => void perform(save)}>{t(busy ? "crypto.ui.processing" : "crypto.ui.saveEncrypted")}</button>
-					</> : sessionContent ? <button disabled={busy} onClick={() => { setDraft(sessionContent); setEditing(true); }}><Pencil size={14} />{t("crypto.ui.edit")}</button>
-						: <button className="mod-cta" disabled={busy || (encrypted && !bundle)} onClick={() => void (encrypted ? unlock() : encrypt())}>
-							<LockKeyhole size={14} />{t(busy ? "crypto.ui.processing" : encrypted ? "crypto.ui.unlock" : "crypto.action.encrypt")}
-						</button>}
+			<footer className="crypto-code-block-footer">
+				{busy && <span className="crypto-footer-label" role="status">{t(editing ? "crypto.ui.editing" : "crypto.ui.processing")}</span>}
+				<div className="action-buttons">
+					{encrypted && <button className="btn" disabled={busy || !bundle} onClick={() => void permanentlyDecrypt()}
+						aria-label={t("crypto.ui.decryptPermanent")} title={t("crypto.ui.decryptPermanent")}><LockKeyholeOpen size={14} /></button>}
+					{sessionContent ? <>
+						<button className="btn" disabled={busy} onClick={() => void edit()}
+							aria-label={t("crypto.ui.edit")} title={t("crypto.ui.edit")}><Pencil size={14} /></button>
+						<button className="btn" disabled={busy} onClick={() => { if (!active.current) clearSession(); }}
+							aria-label={t("crypto.ui.lock")} title={t("crypto.ui.lock")}><LockKeyhole size={14} /></button>
+					</> : <>
+						{!encrypted && <button className="btn" disabled={busy} onClick={() => void encrypt()}
+							aria-label={t("crypto.action.encrypt")} title={t("crypto.action.encrypt")}><KeyRound size={14} /></button>}
+						{!plainPreview && <button className="btn" disabled={busy || (encrypted && !bundle)}
+							onClick={() => encrypted ? void unlock() : setPlainPreview(true)}
+							aria-label={t(encrypted ? "crypto.ui.unlock" : "crypto.action.preview")}
+							title={t(encrypted ? "crypto.ui.unlock" : "crypto.action.preview")}><Eye size={14} /></button>}
+					</>}
+					{plainPreview && !sessionContent && <button className="btn" disabled={busy} onClick={() => setPlainPreview(false)}
+						aria-label={t("crypto.action.closePreview")} title={t("crypto.action.closePreview")}><X size={14} /></button>}
+					{sessionContent && <button className="btn" disabled={busy} onClick={showMenu}
+						aria-label={t("crypto.ui.more")} title={t("crypto.ui.more")}><Ellipsis size={14} /></button>}
+					{(!encrypted || sessionContent) && <button className="btn" disabled={busy} onClick={() => void copy()}
+						aria-label={t("crypto.action.copy")} title={t("crypto.action.copy")}><Copy size={14} /></button>}
 				</div>
 			</footer>
 		</div>

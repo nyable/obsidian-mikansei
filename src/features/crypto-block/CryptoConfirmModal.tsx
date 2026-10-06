@@ -45,16 +45,20 @@ class CryptoConfirmModal extends Modal {
 	}
 }
 
-export function askDirtyAction(app: App): Promise<"save" | "discard" | "continue"> {
+export function askDirtyAction(app: App, signal?: AbortSignal): Promise<"save" | "discard" | "continue"> {
 	return new Promise((resolve) => {
+		if (signal?.aborted) { resolve("continue"); return; }
 		const modal = new Modal(app);
 		let settled = false;
 		const choose = (action: "save" | "discard" | "continue") => {
 			if (settled) return;
 			settled = true;
+			signal?.removeEventListener("abort", abort);
 			resolve(action);
 			modal.close();
 		};
+		const abort = () => choose("continue");
+		signal?.addEventListener("abort", abort, { once: true });
 		modal.titleEl.setText(i18n.t("crypto.ui.unsaved"));
 		modal.contentEl.createEl("p", { text: i18n.t("crypto.ui.unsavedHint") });
 		new Setting(modal.contentEl)

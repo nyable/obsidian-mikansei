@@ -236,17 +236,34 @@ const reactDependencies = {
 	"lucide-react": import.meta.resolve("lucide-react"),
 	"react-i18next": urlFor('export const useTranslation = () => ({ t: (key) => key });'),
 };
+const previewObsidianUrl = urlFor(`
+export class Component {
+    constructor() { this.children = []; this.callbacks = []; this.loaded = false; this.unloads = 0; }
+    load() { this.loaded = true; }
+    unload() { this.unloads++; this.loaded = false; this.onunload?.(); for (const child of this.children) child.unload(); this.children = []; for (const callback of this.callbacks) callback(); this.callbacks = []; }
+    addChild(child) { this.children.push(child); if (this.loaded) child.load(); return child; }
+    removeChild(child) { this.children = this.children.filter((item) => item !== child); child.unload(); return child; }
+    register(callback) { this.callbacks.push(callback); }
+}
+export const renderCalls = [];
+export const MarkdownRenderer = { render: async (...args) => { renderCalls.push(args); await globalThis.previewRenderHook?.(...args); } };
+`);
+const previewUrl = await moduleUrl("src/features/crypto-block/previewRendering.ts", {
+	"obsidian": previewObsidianUrl, "./cryptoService": serviceUrl,
+});
 const { createElement } = await import("react");
 const { CryptoCodeBlockView } = await import(await moduleUrl("src/features/crypto-block/components/CryptoCodeBlockView.tsx", {
 	...reactDependencies,
-	"obsidian": urlFor('export class Notice {} export class Menu {} export const loadPrism = async () => ({});'),
+	"obsidian": urlFor('export class Notice {} export class Menu {}'),
 	"src/shared/confirmModal": urlFor('export const confirmModal = async () => false;'),
 	"../CryptoConfirmModal": urlFor('export const askDirtyAction = async () => "continue"; export const openCryptoDialog = async () => false;'),
+	"../CryptoEditModal": urlFor('export const openCryptoEditor = () => ({ finished: Promise.resolve(), dispose() {} });'),
 	"../crypto": cryptoUrl,
 	"../blockStorage": urls.get("src/features/crypto-block/blockStorage.ts"),
 	"../blockContent": blockUrl,
 	"../cryptoService": serviceUrl,
 	"../autoLock": await moduleUrl("src/features/crypto-block/autoLock.ts"),
+	"../previewRendering": previewUrl,
 }));
 const view = (source) => renderToStaticMarkup(createElement(CryptoCodeBlockView, {
 	source, el: {}, ctx: { sourcePath: "note.md" }, plugin: { settings: { cryptoBlockHeight: 300, cryptoAutoLockMinutes: 5 } },
@@ -256,7 +273,8 @@ test("locked UI never exposes plaintext, copy or repeat-encryption actions", asy
 	const html = view(await encryptContent("very private secret", "password", "public remark", "js"));
 	assert.match(html, /public remark/);
 	assert.match(html, /crypto.ui.unlock/);
-	assert.doesNotMatch(html, /very private secret|crypto.action.encrypt|crypto.action.copy|crypto.ui.decryptPermanent/);
+	assert.match(html, /aria-label="crypto.ui.decryptPermanent"/);
+	assert.doesNotMatch(html, /very private secret|crypto.action.encrypt|crypto.action.copy/);
 	assert.match(html, /<button/);
 	assert.doesNotMatch(html, /role="button"/);
 });
@@ -267,7 +285,144 @@ test("plaintext UI escapes markup and supports encryption and copy", () => {
 	assert.doesNotMatch(html, /<script>/);
 	assert.match(html, /crypto.action.encrypt/);
 	assert.match(html, /crypto.action.copy/);
+	assert.match(html, /crypto.action.preview/);
+	assert.match(html, /remark-text/);
+	assert.doesNotMatch(html, /<pre|<code|crypto-block-header/);
 	assert.doesNotMatch(html, /crypto.ui.unlock</);
+});
+
+const { previewMarkdown, renderCryptoPreview } = await import(previewUrl);
+const { Component, renderCalls } = await import(previewObsidianUrl);
+
+function previewContainer() {
+	const host = { removed: false, content: "", remove() { this.removed = true; }, replaceChildren() { this.content = ""; } };
+	const container = { ownerDocument: { createElement: () => host }, replaceChildren(node) { this.host = node; } };
+	return { host, container };
+}
+
+test("preview Markdown forwards plugin language and keeps embedded fences inside a single block", () => {
+	const text = "```js\nhello\n```\n`````\n";
+	const markdown = previewMarkdown(text, "dataview");
+	const [block] = parseFencedBlocks(markdown);
+	assert.equal(block.language, "dataview");
+	assert.equal(block.body, text);
+	assert.equal(block.marker, "``````");
+	assert.equal(parseFencedBlocks(markdown).length, 1);
+	assert.equal(previewMarkdown("", "mermaid"), "```mermaid\n\n```");
+});
+
+test("preview delegates to Obsidian with the source path and an independently owned component", async () => {
+	const parent = new Component(); parent.load();
+	const app = {};
+	const { host, container } = previewContainer();
+	const preview = renderCryptoPreview(app, parent, container, "folder/note.md", "graph TD; A-->B", "mermaid");
+	await preview.finished;
+	const [renderApp, markdown, renderHost, path, owner] = renderCalls.at(-1);
+	assert.equal(renderApp, app);
+	assert.equal(renderHost, host);
+	assert.equal(path, "folder/note.md");
+	assert.equal(markdown, "```mermaid\ngraph TD; A-->B\n```");
+	assert.notEqual(owner, parent);
+	assert.equal(owner.loaded, true);
+	const pluginChild = owner.addChild(new Component());
+	preview.dispose(); preview.dispose();
+	assert.equal(pluginChild.unloads, 1);
+	assert.equal(owner.unloads, 1);
+	assert.equal(parent.children.length, 0);
+	assert.equal(host.removed, true);
+});
+
+test("late async processors cannot resurrect a closed preview or retain registered resources", async () => {
+	let complete;
+	globalThis.previewRenderHook = () => new Promise((resolve) => { complete = resolve; });
+	try {
+		const parent = new Component(); parent.load();
+		const { host, container } = previewContainer();
+		const preview = renderCryptoPreview({}, parent, container, "note.md", "secret", "dataview");
+		const owner = renderCalls.at(-1)[4];
+		preview.dispose();
+		const lateChild = owner.addChild(new Component());
+		assert.equal(lateChild.unloads, 1);
+		let released = false;
+		owner.register(() => { released = true; });
+		assert.equal(released, true);
+		host.content = "late plaintext";
+		complete();
+		await preview.finished;
+		assert.equal(host.content, "");
+		assert.equal(host.removed, true);
+	} finally { delete globalThis.previewRenderHook; }
+});
+
+test("parent unload cleans up code block processor children", async () => {
+	const parent = new Component(); parent.load();
+	const { host, container } = previewContainer();
+	const preview = renderCryptoPreview({}, parent, container, "note.md", "secret", "text");
+	await preview.finished;
+	const owner = renderCalls.at(-1)[4];
+	const child = owner.addChild(new Component());
+	parent.unload();
+	assert.equal(child.unloads, 1);
+	assert.equal(owner.loaded, false);
+	assert.equal(host.removed, true);
+	assert.equal(host.content, "");
+});
+
+test("parent unload during rendering also clears output from late async processors", async () => {
+	let complete;
+	globalThis.previewRenderHook = () => new Promise((resolve) => { complete = resolve; });
+	try {
+		const parent = new Component(); parent.load();
+		const { host, container } = previewContainer();
+		const preview = renderCryptoPreview({}, parent, container, "note.md", "secret", "dataview");
+		parent.unload();
+		host.content = "late secret";
+		complete();
+		await preview.finished;
+		assert.equal(host.content, "");
+		assert.equal(host.removed, true);
+	} finally { delete globalThis.previewRenderHook; }
+});
+
+test("third-party code block rendering output is left intact until preview cleanup", async () => {
+	const parent = new Component(); parent.load();
+	const { host, container } = previewContainer();
+	let child;
+	globalThis.previewRenderHook = async (app, markdown, node, path, owner) => {
+		const [block] = parseFencedBlocks(markdown);
+		assert.equal(block.language, "dataview");
+		assert.equal(block.body, "LIST FROM #notes");
+		child = owner.addChild(new Component());
+		node.content = "third-party query results with custom controls";
+	};
+	try {
+		const preview = renderCryptoPreview({}, parent, container, "note.md", "LIST FROM #notes", "dataview");
+		await preview.finished;
+		assert.equal(host.content, "third-party query results with custom controls");
+		assert.equal(child.loaded, true);
+		preview.dispose();
+		assert.equal(host.content, "");
+		assert.equal(child.unloads, 1);
+	} finally { delete globalThis.previewRenderHook; }
+});
+
+test("failed rendering can dispose all partially registered processor resources", async () => {
+	const parent = new Component(); parent.load();
+	const { host, container } = previewContainer();
+	let child;
+	globalThis.previewRenderHook = async (app, markdown, node, path, owner) => {
+		child = owner.addChild(new Component());
+		node.content = "partially rendered secret";
+		throw new Error("processor failure");
+	};
+	try {
+		const preview = renderCryptoPreview({}, parent, container, "note.md", "secret", "dataview");
+		await assert.rejects(preview.finished, /processor failure/);
+		preview.dispose();
+		assert.equal(host.content, "");
+		assert.equal(child.unloads, 1);
+		assert.equal(parent.children.length, 0);
+	} finally { delete globalThis.previewRenderHook; }
 });
 
 test("malformed encrypted bundles disable unlocking rather than offering repeat encryption", () => {

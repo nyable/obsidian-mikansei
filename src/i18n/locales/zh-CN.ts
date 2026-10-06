@@ -19,11 +19,13 @@ const zhCN = {
 	},
 	crypto: {
 		ui: {
+			previewFailed: "预览渲染失败，请检查对应代码块插件。可以复制内容或重新打开预览。",
 			unlock: "解锁查看",
 			unlocked: "已解锁",
 			lock: "锁定",
 			more: "更多操作",
 			edit: "编辑",
+			editTitle: "编辑加密代码块",
 			editing: "正在编辑",
 			content: "内容",
 			cancel: "取消",
@@ -40,7 +42,7 @@ const zhCN = {
 			lockedHint: "内容已加密，输入密码后查看。",
 			unlockHint: "解锁仅用于本次查看，不会把明文写入笔记。",
 			encryptHint: "使用密码加密此代码块。密码无法找回，请妥善保存。",
-			editMemoryHint: "草稿仅保存在当前视图内存中。关闭笔记、切换模式或退出应用可能丢失未保存修改。Ctrl/Cmd + Enter 加密保存。",
+			editMemoryHint: "编辑期间暂停自动锁定。草稿仅保存在内存中，关闭笔记或退出应用会清除草稿。Ctrl/Cmd + Enter 加密保存。",
 			remarkLabel: "公开备注（选填）",
 			remarkPublic: "备注不受加密保护，请勿填写敏感信息。",
 			publicRemark: "公开备注",
