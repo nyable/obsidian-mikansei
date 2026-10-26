@@ -136,7 +136,9 @@ export function CryptoCodeBlockView({ source, el, ctx, plugin }: CryptoCodeBlock
 				mode: "encrypt", title: t("crypto.dialog.encryptTitle"), submitLabel: t("crypto.dialog.submitEncrypt"),
 				description: t("crypto.ui.encryptHint"),
 				onSubmit: async ({ password, remarks, language }) => {
+					if (!mounted.current) throw new BlockConflictError();
 					const body = await encryptContent(captured.snapshot.block.body, password, remarks, language ?? "text");
+					if (!mounted.current) throw new BlockConflictError();
 					await writeTarget(plugin.app, captured, body);
 					new Notice(t("crypto.notice.encryptSuccess"));
 				},
@@ -175,8 +177,10 @@ export function CryptoCodeBlockView({ source, el, ctx, plugin }: CryptoCodeBlock
 				mode: "change", title: t("crypto.ui.changePassword"), submitLabel: t("crypto.ui.changePassword"),
 				description: t("crypto.ui.passwordHistoryWarning"),
 				onSubmit: async ({ password, oldPassword }) => {
+					if (!mounted.current || sessionRef.current !== session) throw new BlockConflictError();
 					const result = await unlockContent(session.target.snapshot.block.body, oldPassword ?? "");
 					const body = await encryptContent(result.text, password, result.remark, result.language);
+					if (!mounted.current || sessionRef.current !== session) throw new BlockConflictError();
 					await writeTarget(plugin.app, session.target, body);
 					if (mounted.current) clearSession();
 					new Notice(t("crypto.ui.passwordChanged"));

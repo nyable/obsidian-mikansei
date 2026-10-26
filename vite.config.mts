@@ -52,6 +52,10 @@ export default defineConfig(({ mode }) => {
 	const prod = mode === "production";
 	return {
 		plugins: [react(), bannerPlugin(banner), copyManifest()],
+		// Library builds otherwise retain React's Node-only environment checks.
+		define: {
+			"process.env.NODE_ENV": JSON.stringify(prod ? "production" : "development"),
+		},
 		resolve: {
 			alias: [
 				{

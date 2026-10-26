@@ -6,10 +6,17 @@ import {
 	Toggle,
 } from "../components/SettingControls";
 import type { TabProps } from "../tabProps";
-import { DEFAULT_SETTINGS } from "../types";
+import { useDebouncedDraft } from "../components/useDebouncedDraft";
+
+const validTimeout = (value: string) => {
+	const number = Number(value);
+	return value.trim() && Number.isInteger(number) && number >= 0 && number <= 10000 ? String(number) : null;
+};
 
 export function LinkPasteTab({ settings, update, reset }: TabProps) {
 	const { t } = useTranslation();
+	const timeout = useDebouncedDraft(String(settings.fetchTitleTimeout), validTimeout,
+		(value) => update({ fetchTitleTimeout: Number(value) }));
 
 	return (
 		<>
@@ -43,14 +50,11 @@ export function LinkPasteTab({ settings, update, reset }: TabProps) {
 							min={0}
 							max={10000}
 							step={100}
-							value={settings.fetchTitleTimeout}
-							onChange={(e) => {
-								update({
-									fetchTitleTimeout:
-										parseInt(e.target.value, 10) ||
-										DEFAULT_SETTINGS.fetchTitleTimeout,
-								});
-							}}
+							value={timeout.draft}
+							aria-label={t("settings.fetchTimeout.name")}
+							aria-invalid={timeout.invalid}
+							onChange={(e) => timeout.change(e.target.value)}
+							onBlur={timeout.flush}
 						/>
 					</SettingItem>
 				</>
@@ -59,7 +63,7 @@ export function LinkPasteTab({ settings, update, reset }: TabProps) {
 				name={t("settings.reset.tabName")}
 				desc={t("settings.reset.tabDesc")}
 				buttonText={t("settings.reset.button")}
-				onReset={reset}
+				onReset={() => { timeout.flush(); reset(); }}
 			/>
 		</>
 	);

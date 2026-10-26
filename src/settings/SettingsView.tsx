@@ -4,7 +4,6 @@ import { Notice } from "obsidian";
 import type Mikansei from "src/main";
 import { i18n, resolveLocale } from "src/i18n";
 import { confirmModal } from "src/shared/confirmModal";
-import { applyBracketStyles } from "src/features/bracket-matching/bracketMatching";
 import { DEFAULT_SETTINGS, type PluginSettings } from "./types";
 import type { TabProps } from "./tabProps";
 import { GeneralTab } from "./tabs/GeneralTab";
@@ -62,8 +61,11 @@ export function SettingsView({ plugin }: SettingsViewProps) {
 		const next = { ...plugin.settings, ...patch };
 		setSettings(next);
 		Object.assign(plugin.settings, next);
-		void plugin.saveSettings();
-		applyBracketStyles(next);
+		plugin.applySettings();
+		void plugin.saveSettings().catch((error: unknown) => {
+			console.error("Mikansei: settings save failed", error);
+			new Notice(i18n.t("settings.saveFailed"));
+		});
 	};
 
 	const resetTab = async () => {

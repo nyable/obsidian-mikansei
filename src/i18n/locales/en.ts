@@ -13,6 +13,8 @@ const en = {
 		misc: "Misc",
 	},
 	linkPaste: {
+		documentChanged: "The note changed or link enhancement was disabled. Nothing was inserted; please paste again.",
+		failed: "Could not paste the link. Please try again.",
 		asLink: "As link",
 		asText: "As text",
 		asImage: "As image",
@@ -136,6 +138,7 @@ const en = {
 		},
 	},
 	settings: {
+		saveFailed: "Could not save settings. Please try again.",
 		general: {
 			heading: "General",
 			language: {
@@ -156,7 +159,7 @@ const en = {
 		},
 		fetchTimeout: {
 			name: "Fetch title timeout (ms)",
-			desc: "Use the default title after this timeout",
+			desc: "Use the default title after this timeout. Set to 0 to skip fetching page titles.",
 		},
 		bracket: {
 			heading: "Bracket Matching",
@@ -188,7 +191,7 @@ const en = {
 		},
 		cryptoLanguage: {
 			name: "Crypto block language",
-			desc: "Custom language identifier for encrypted blocks (e.g. ```nya). Requires reloading the plugin.",
+			desc: "Custom language identifier for encrypted blocks (e.g. ```nya). Changes apply immediately; identifiers in existing notes are not replaced.",
 		},
 		cryptoHeight: {
 			name: "Preview max height (px)",

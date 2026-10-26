@@ -1,7 +1,7 @@
 import { MarkdownView } from "obsidian";
 import type Mikansei from "src/main";
 import { i18n } from "src/i18n";
-import { latestMatch } from "./bracketMatching";
+import { currentBracketMatch } from "./bracketMatching";
 
 export function registerBracketCommands(plugin: Mikansei): void {
 	plugin.addCommand({
@@ -11,9 +11,11 @@ export function registerBracketCommands(plugin: Mikansei): void {
 		editorCheckCallback: (checking, editor, view) => {
 			if (!(view instanceof MarkdownView)) return false;
 
-			if (!latestMatch) return false;
+			if (!plugin.settings.bracketMatchingEnabled) return false;
+			const match = currentBracketMatch(editor);
+			if (!match) return false;
 
-			const { start, end } = latestMatch;
+			const { start, end } = match;
 			const offset = editor.posToOffset(editor.getCursor("from"));
 
 			const displayFlag =
@@ -22,7 +24,8 @@ export function registerBracketCommands(plugin: Mikansei): void {
 
 			if (displayFlag) {
 				if (!checking) {
-					editor.setCursor(editor.offsetToPos(end.to));
+					const atStart = start.from <= offset && offset <= start.to;
+					editor.setCursor(editor.offsetToPos(atStart ? end.to : start.to));
 				}
 				return true;
 			}
@@ -38,9 +41,11 @@ export function registerBracketCommands(plugin: Mikansei): void {
 		editorCheckCallback: (checking, editor, view) => {
 			if (!(view instanceof MarkdownView)) return false;
 
-			if (!latestMatch) return false;
+			if (!plugin.settings.bracketMatchingEnabled) return false;
+			const match = currentBracketMatch(editor);
+			if (!match) return false;
 
-			const { start, end } = latestMatch;
+			const { start, end } = match;
 			const offset = editor.posToOffset(editor.getCursor("from"));
 
 			const displayFlag =

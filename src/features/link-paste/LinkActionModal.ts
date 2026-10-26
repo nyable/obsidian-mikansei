@@ -4,7 +4,7 @@ import type { App } from "obsidian";
 export interface LinkAction {
 	label: string;
 	value: string;
-	callback: (value: string) => void;
+	callback: (value: string) => void | Promise<void>;
 }
 
 export class LinkActionModal extends SuggestModal<LinkAction> {

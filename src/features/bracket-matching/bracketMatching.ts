@@ -1,6 +1,7 @@
-import { bracketMatching } from "@codemirror/language";
-import type { Range } from "@codemirror/state";
+import { bracketMatching, matchBrackets } from "@codemirror/language";
+import type { EditorState, Range } from "@codemirror/state";
 import { Decoration } from "@codemirror/view";
+import { editorInfoField, type Editor } from "obsidian";
 import type Mikansei from "src/main";
 import type { PluginSettings } from "src/settings/types";
 
@@ -9,17 +10,27 @@ export interface BracketMatch {
 	end: { from: number; to: number };
 }
 
-export let latestMatch: BracketMatch | null = null;
+// Weak keys keep matching context local without retaining closed editors.
+const editorStates = new WeakMap<Editor, EditorState>();
+
+/** Resolve the current cursor against the current editor, never a previous render's offsets. */
+export function currentBracketMatch(editor: Editor): BracketMatch | null {
+	const state = editorStates.get(editor);
+	if (!state || state.doc.toString() !== editor.getValue() || editor.somethingSelected()) return null;
+	const pos = editor.posToOffset(editor.getCursor());
+	const match = matchBrackets(state, pos, -1)
+		|| (pos > 0 && matchBrackets(state, pos - 1, 1))
+		|| matchBrackets(state, pos, 1)
+		|| (pos < state.doc.length && matchBrackets(state, pos + 1, -1));
+	return match && match.matched && match.end ? { start: match.start, end: match.end } : null;
+}
 
 export const highlightBracket = (plugin: Mikansei) =>
 	bracketMatching({
-		renderMatch: (match) => {
+		renderMatch: (match, state) => {
+			const editor = state.field(editorInfoField, false)?.editor;
+			if (editor) editorStates.set(editor, state);
 			const { matched, start, end } = match;
-
-			// Update the latest match
-			if (matched && end) {
-				latestMatch = { start, end };
-			}
 
 			const decorations: Range<Decoration>[] = [];
 
@@ -47,6 +58,12 @@ export const highlightBracket = (plugin: Mikansei) =>
 			return decorations;
 		},
 	});
+
+export function clearBracketStyles(): void {
+	document.body.style.removeProperty("--nya-bracket-match-color");
+	document.body.style.removeProperty("--nya-bracket-miss-color");
+	document.body.classList.remove("nya-bracket-style-underline", "nya-bracket-style-background", "nya-bracket-style-text");
+}
 
 /**
  * 把括号高亮的颜色与样式方案应用到全局：

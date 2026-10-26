@@ -13,6 +13,8 @@ const zhCN = {
 		misc: "其他",
 	},
 	linkPaste: {
+		documentChanged: "笔记已变化或链接增强已关闭，未插入链接。请重新粘贴。",
+		failed: "链接粘贴失败，请重试。",
 		asLink: "作为链接",
 		asText: "作为文本",
 		asImage: "作为图片",
@@ -131,6 +133,7 @@ const zhCN = {
 		},
 	},
 	settings: {
+		saveFailed: "设置保存失败，请重试。",
 		general: {
 			heading: "通用",
 			language: {
@@ -151,7 +154,7 @@ const zhCN = {
 		},
 		fetchTimeout: {
 			name: "获取网页标题超时时间(毫秒)",
-			desc: "超过此时间后直接使用默认标题",
+			desc: "超过此时间后使用默认标题。0 表示不请求网页标题。",
 		},
 		bracket: {
 			heading: "括号匹配高亮",
@@ -183,7 +186,7 @@ const zhCN = {
 		},
 		cryptoLanguage: {
 			name: "加密代码块语言名称",
-			desc: "自定义加密代码块的语言标识符（如 ```nya）。修改后需要重新加载插件才能生效。",
+			desc: "自定义加密代码块的语言标识符（如 ```nya）。修改后立即生效；已有笔记的标识符不会自动替换。",
 		},
 		cryptoHeight: {
 			name: "预览详情最大高度 (px)",

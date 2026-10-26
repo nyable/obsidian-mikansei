@@ -1,8 +1,13 @@
 # AGENTS.md
 
-本项目的开发规范见 [`docs/DEVELOPMENT.md`](./docs/DEVELOPMENT.md)。几条硬性要求：
+本项目的开发规范以 [`docs/DEVELOPMENT.md`](./docs/DEVELOPMENT.md) 为准，用户说明见 [`README.md`](./README.md)。以下为硬性要求：
 
 1. **高频交互不要直接持久化**：输入 / 拖拽等 `onChange` 可能每秒触发几十次，禁止在回调里直接写回 `plugin.settings` 并 `saveSettings()`。应使用「本地草稿状态 + 防抖提交 + 交互结束/关闭/卸载时 flush」。参考 `src/settings/components/ColorInput.tsx`。
 2. **i18n**：面向用户的文案必须走 `src/i18n`，中英文键集保持一致。
-3. **提交前**：`pnpm build`（含 `tsc --noEmit`）与 `pnpm lint` 必须通过。
+3. **提交前**：运行 `pnpm check`，确保 `pnpm lint`、`pnpm test`、`pnpm build`（含 `tsc --noEmit`）全部通过；不得通过跳过测试或放宽规则掩盖失败。
 4. **加密数据格式**：`src/features/crypto-block/crypto.ts` 的算法与打包格式保持向后兼容，不得随意改动。
+5. **移动端兼容**：`src/` 不得直接使用 Node.js / Electron 模块及 Node 全局变量；构建脚本不受此运行时限制。保留 Vite lib 模式的 `process.env.NODE_ENV` 编译期替换，开发、生产产物均须通过无 Node 全局变量的加载测试。新增外部依赖必须核对移动端可用性，不得仅为通过测试扩充允许列表。
+6. **异步写入保护**：操作前捕获文件与目标，异步完成后重新校验内容、选区（如适用）、功能开关与生命周期；不得用请求完成时的新光标替换用户内容。冲突时拒绝写入或保留原内容。
+7. **设置生效一致性**：即时生效的设置必须同步实际行为，不得长期捕获旧设置。通过 `applySettings()` 按需重配置，设置通过 `saveSettings()` 顺序保存并处理失败；确需重载的设置必须在文案中明确说明。
+8. **生命周期与状态隔离**：事件、计时器、React 树、渲染处理器及全局样式必须有清理路径；清理应可重复调用，重复切换不得重复注册。编辑器位置和敏感会话不得跨笔记共用。
+9. **验证与文档**：行为变更须增加或更新回归测试，并同步相关文档。测试优先验证实际行为；模拟加载不能代替 Android / iOS 真机验证，发布记录须区分二者。详见开发文档的「验证与验收」。
