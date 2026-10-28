@@ -13,16 +13,21 @@ export interface ConfirmOptions {
  */
 export function confirmModal(
 	app: App,
-	options: ConfirmOptions
+	options: ConfirmOptions,
+	signal?: AbortSignal
 ): Promise<boolean> {
 	return new Promise((resolve) => {
+		if (signal?.aborted) { resolve(false); return; }
 		const modal = new Modal(app);
 		let settled = false;
 		const settle = (value: boolean) => {
 			if (settled) return;
 			settled = true;
+			signal?.removeEventListener("abort", abort);
 			resolve(value);
 		};
+		const abort = () => { settle(false); modal.close(); };
+		signal?.addEventListener("abort", abort, { once: true });
 
 		modal.titleEl.setText(options.title);
 		modal.contentEl.createEl("p", { text: options.message });

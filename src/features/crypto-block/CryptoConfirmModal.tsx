@@ -5,22 +5,31 @@ import type { CryptoDialogOptions } from "./types";
 import { i18n } from "src/i18n";
 
 /** Keep the modal open until validation and the requested operation succeed. */
-export function openCryptoDialog(app: App, options: CryptoDialogOptions): Promise<boolean> {
-	return new Promise((resolve) => new CryptoConfirmModal(app, options, resolve).open());
+export function openCryptoDialog(app: App, options: CryptoDialogOptions, signal?: AbortSignal): Promise<boolean> {
+	if (signal?.aborted) return Promise.resolve(false);
+	return new Promise((resolve) => {
+		const modal = new CryptoConfirmModal(app, options, resolve, signal);
+		modal.open();
+	});
 }
 
 class CryptoConfirmModal extends Modal {
 	private root: Root | null = null;
 	private settled = false;
 	private busy = false;
-	constructor(app: App, private options: CryptoDialogOptions, private resolve: (success: boolean) => void) {
+	private readonly abort = () => { super.close(); };
+	constructor(app: App, private options: CryptoDialogOptions | null, private resolve: (success: boolean) => void, private signal?: AbortSignal) {
 		super(app);
 	}
 	onOpen(): void {
+		const options = this.options;
+		if (!options || this.signal?.aborted) { this.abort(); return; }
+		this.signal?.addEventListener("abort", this.abort, { once: true });
 		this.modalEl.addClass("nya-crypto-modal");
-		this.titleEl.setText(this.options.title);
+		this.titleEl.setText(options.title);
 		this.root = createRoot(this.contentEl);
-		this.root.render(<CryptoDialog options={{ ...this.options, onSubmit: async (data) => {
+		this.root.render(<CryptoDialog options={{ ...options, onSubmit: async (data) => {
+			if (this.settled || !this.options) throw new DOMException("", "AbortError");
 			this.busy = true;
 			try { await this.options.onSubmit(data); } finally { this.busy = false; }
 		} }} onSuccess={() => {
@@ -34,6 +43,8 @@ class CryptoConfirmModal extends Modal {
 	}
 	onClose(): void {
 		this.settle(false);
+		this.signal?.removeEventListener("abort", this.abort);
+		this.options = null;
 		this.root?.unmount();
 		this.root = null;
 		this.contentEl.empty();

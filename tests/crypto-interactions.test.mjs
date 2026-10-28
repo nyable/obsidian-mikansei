@@ -68,7 +68,7 @@ function harness(options = {}) {
 			if (password !== "correct") throw new Error("wrong password");
 			return { text: "plaintext", remark: "public", language: "dataview" };
 		},
-		async write(app, target, text) { this.writes.push({ target, text }); },
+		async write(app, target, text, validate) { validate?.(); this.writes.push({ target, text }); },
 		async dialog(app, dialog) { this.dialogCalls.push(dialog); await dialog.onSubmit({ password: "correct" }); return true; },
 		async confirm(app, confirmation) { this.confirmations.push(confirmation); return true; },
 		editor(app, initial, save) {
@@ -78,10 +78,11 @@ function harness(options = {}) {
 		...options,
 	};
 	globalThis.cryptoHarness = state;
-	const tree = CryptoCodeBlockView({ source: "cipher", el: { ownerDocument: { addEventListener() {}, removeEventListener() {} } }, ctx: { sourcePath: "note.md", getSectionInfo: () => ({ lineStart: 0 }) }, plugin: { app: {}, settings: { cryptoBlockLanguage: "nya", cryptoBlockHeight: 300, cryptoAutoLockMinutes: 5 } } });
+	const plugin = { app: {}, settings: { cryptoBlockEnabled: true, cryptoBlockLanguage: "nya", cryptoBlockHeight: 300, cryptoAutoLockMinutes: 5 } };
+	const tree = CryptoCodeBlockView({ source: "cipher", el: { ownerDocument: { addEventListener() {}, removeEventListener() {} } }, ctx: { sourcePath: "note.md", getSectionInfo: () => ({ lineStart: 0 }) }, plugin });
 	const button = buttons(tree).find((item) => item.props["aria-label"] === "crypto.ui.decryptPermanent");
 	assert.ok(button, "Permanent decryption must be directly accessible on the toolbar");
-	return { state, tree, button, finished };
+	return { state, tree, button, finished, plugin };
 }
 
 test("locked toolbar decrypts directly with an explicit plaintext warning, without unlocking a preview", async () => {
@@ -101,6 +102,18 @@ test("cancelling direct decryption performs no decrypt or write", async () => {
 	button.props.onClick(); await finished;
 	assert.equal(state.unlockCalls.length, 0);
 	assert.equal(state.writes.length, 0);
+});
+
+test("toolbar rejects feature disable while waiting for a password result", async () => {
+	let release;
+	const { state, button, finished, plugin } = harness({ unlock: () => new Promise((resolve) => { release = resolve; }) });
+	button.props.onClick();
+	await new Promise((resolve) => setImmediate(resolve));
+	plugin.settings.cryptoBlockEnabled = false;
+	release({ text: "plaintext", remark: "", language: "text" });
+	await finished;
+	assert.deepEqual(state.writes, []);
+	assert.equal(state.updates[2], "failure");
 });
 
 test("direct decryption propagates errors to the same dialog callback for retry", async () => {

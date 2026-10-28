@@ -26,6 +26,7 @@ export function BracketTab({ settings, update, reset }: TabProps) {
 				desc={t("settings.bracket.desc")}
 			>
 				<Toggle
+					label={t("settings.bracket.heading")}
 					value={settings.bracketMatchingEnabled}
 					onChange={(v) => update({ bracketMatchingEnabled: v })}
 				/>
@@ -75,6 +76,7 @@ export function BracketTab({ settings, update, reset }: TabProps) {
 						desc={t("settings.bracketHighlightUnmatched.desc")}
 					>
 						<Toggle
+							label={t("settings.bracketHighlightUnmatched.name")}
 							value={settings.highlightUnmatchedBrackets}
 							onChange={(v) =>
 								update({ highlightUnmatchedBrackets: v })

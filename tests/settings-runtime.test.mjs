@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import ts from "typescript";
+import { renderToStaticMarkup } from "react-dom/server";
+import { createElement } from "react";
 
 const urlFor = (code) => `data:text/javascript;base64,${Buffer.from(code).toString("base64")}`;
 async function moduleUrl(path, dependencies = {}) {
@@ -37,14 +39,14 @@ const { default: Mikansei } = await import(await moduleUrl("src/main.ts", {
 	"./features/bracket-matching/bracketCommands": urlFor('export const registerBracketCommands = () => { globalThis.settingsHarness.bracketCommands++; };'),
 	"./features/link-paste/linkPasteEnhancer": urlFor('export const enhanceLinkPaste = () => { globalThis.settingsHarness.linkHandlers++; };'),
 	"./features/crypto-block/codeBlockProcessor": urlFor('export const codeBlockCrypto = (plugin) => { const h = globalThis.settingsHarness; h.registrations.push(plugin.settings.cryptoBlockLanguage); h.active++; return () => { h.disposals++; h.active--; }; };'),
-	"./features/crypto-block/cryptoCommands": urlFor('export const registerCryptoCommands = () => { globalThis.settingsHarness.cryptoCommands++; };'),
+	"./features/crypto-block/cryptoCommands": urlFor('export const registerCryptoCommands = () => { globalThis.settingsHarness.cryptoCommands++; return () => { globalThis.settingsHarness.commandCancels++; }; };'),
 	"./settings/SettingsTab": urlFor('export class MikanseiSettingTab {}'),
 	"./settings/types": settingsUrl,
 	"./i18n": urlFor('export const initI18n = async () => {};'),
 }));
 function harness() {
 	const state = { leaves: [{ view: new MarkdownView() }], refreshes: 0, renders: 0, registrations: [], active: 0, disposals: 0,
-		cleared: 0, linkHandlers: 0, bracketCommands: 0, cryptoCommands: 0, async save() {} };
+		cleared: 0, linkHandlers: 0, bracketCommands: 0, cryptoCommands: 0, commandCancels: 0, async save() {} };
 	globalThis.settingsHarness = state;
 	return { state, plugin: new Mikansei() };
 }
@@ -74,6 +76,7 @@ test("features disabled at startup can be enabled without reloading or duplicate
 	assert.equal(plugin.extensions.length, 0);
 	assert.equal(state.active, 0);
 	assert.equal(state.renders, 3);
+	assert.equal(state.commandCancels, 4);
 	for (const callback of plugin.callbacks) callback();
 	assert.equal(state.cleared, 1);
 	assert.equal(state.active, 0);
@@ -127,6 +130,18 @@ test("invalid persisted identifiers and timeouts fall back safely, while zero is
 	assert.equal(plugin.settings.fetchTitleTimeout, 0);
 });
 
+test("all persisted settings enforce their type, enums and UI ranges without losing valid false or zero", async () => {
+	const { plugin } = harness();
+	for (const data of [null, [], "bad", { language: "xx", cryptoBlockEnabled: "false", fetchTitle: 0, linkPasteEnhancer: null, bracketMatchingEnabled: {}, highlightUnmatchedBrackets: [], cryptoBlockHeight: -900, bracketStyle: "oops", bracketMatchColor: {}, bracketMissColor: "url(foo)", unknown: true }]) {
+		plugin.data = data;
+		await plugin.loadSettings();
+		assert.deepEqual(plugin.settings, DEFAULT_SETTINGS);
+	}
+	plugin.data = { language: "en", cryptoBlockEnabled: false, fetchTitle: false, linkPasteEnhancer: false, bracketMatchingEnabled: false, highlightUnmatchedBrackets: false, cryptoBlockHeight: 50, cryptoAutoLockMinutes: 0, fetchTitleTimeout: 0, bracketMatchColor: "#abc", bracketMissColor: "#aabbccdd", bracketStyle: "text" };
+	await plugin.loadSettings();
+	assert.deepEqual(plugin.settings, { ...DEFAULT_SETTINGS, ...plugin.data });
+});
+
 const processorUrl = urlFor(`
 export const MarkdownPreviewRenderer = {
     createCodeBlockPostProcessor(language, handler) { globalThis.processorHarness.handler = handler; return () => {}; },
@@ -165,7 +180,7 @@ test("crypto processor disposal unmounts live children once and rejects late cal
 const hooksUrl = urlFor(`
 export const useState = (initial) => {
     const h = globalThis.draftHarness, index = h.index++;
-    h.slots[index] ??= { value: initial };
+    h.slots[index] ??= { value: typeof initial === "function" ? initial() : initial };
     return [h.slots[index].value, (value) => { h.slots[index].value = value; }];
 };
 export const useRef = (initial) => {
@@ -180,6 +195,92 @@ export const useEffect = (callback, deps) => {
 };
 `);
 const { useDebouncedDraft } = await import(await moduleUrl("src/settings/components/useDebouncedDraft.ts", { "react": hooksUrl }));
+
+const { ColorInput } = await import(await moduleUrl("src/settings/components/ColorInput.tsx", {
+	"react": hooksUrl, "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
+	"react-colorful": urlFor('export const HexAlphaColorPicker = () => null, HexColorInput = () => null;'),
+	"./useDebouncedDraft": await moduleUrl("src/settings/components/useDebouncedDraft.ts", { "react": hooksUrl }),
+}));
+test("open color drafts debounce, flush the latest event and yield to external resets", (t) => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	const state = { slots: [], index: 0 };
+	globalThis.draftHarness = state;
+	const commits = [];
+	const render = (value) => { state.index = 0; return ColorInput({ value, name: "Color", desc: "", ariaLabel: "Open", onChange: (value) => commits.push(value) }); };
+	let tree = render("#808080");
+	tree.props.children[1].props.children.props.onClick();
+	tree = render("#808080");
+	const picker = tree.props.children[2].props.children[0];
+	picker.props.onChange("#123456");
+	assert.deepEqual(commits, []);
+	tree.props.onPointerUp(); // Flush must see the latest event, even before rerender.
+	assert.deepEqual(commits, ["#123456"]);
+	picker.props.onChange("#abcdef");
+	render("#ff0000");
+	t.mock.timers.tick(250);
+	assert.deepEqual(commits, ["#123456"]);
+	for (const slot of state.slots) slot.cleanup?.();
+	assert.deepEqual(commits, ["#123456"]);
+});
+
+const controlsUrl = await moduleUrl("src/settings/components/SettingControls.tsx", { "react/jsx-runtime": import.meta.resolve("react/jsx-runtime") });
+const { Toggle } = await import(controlsUrl);
+test("settings switches are labeled native buttons with state and a single activation callback", () => {
+	const values = [];
+	const html = renderToStaticMarkup(createElement(Toggle, { value: true, label: "Feature", onChange() {} }));
+	assert.match(html, /<button/);
+	assert.match(html, /role="switch"/);
+	assert.match(html, /aria-label="Feature"/);
+	assert.match(html, /aria-checked="true"/);
+	assert.doesNotMatch(html, /tabindex="-1"/);
+	Toggle({ value: false, label: "Feature", onChange: (value) => values.push(value) }).props.onClick();
+	assert.deepEqual(values, [true]);
+});
+
+const viewDependencies = {
+	"react": hooksUrl, "react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
+	"react-i18next": urlFor('export const useTranslation = () => ({ t: (key) => key });'),
+	"obsidian": urlFor('export class Notice { constructor(message) { globalThis.viewHarness.notices.push(message); } }'),
+	"src/i18n": urlFor('export const i18n = { t: (key) => key, changeLanguage: async () => {} }; export const resolveLocale = (value) => value;'),
+	"src/shared/confirmModal": urlFor('export const confirmModal = async () => true;'),
+	"./types": settingsUrl,
+};
+for (const name of ["GeneralTab", "LinkPasteTab", "BracketTab", "CryptoTab", "MiscTab"]) viewDependencies[`./tabs/${name}`] = urlFor(`export const ${name} = () => null;`);
+const { SettingsView } = await import(await moduleUrl("src/settings/SettingsView.tsx", viewDependencies));
+test("reset invalidates same-value drafts and reports success only after persistence, with a retry action", async () => {
+	globalThis.draftHarness = { slots: [], index: 0 };
+	const state = { notices: [], writes: [], fail: true };
+	globalThis.viewHarness = state;
+	const plugin = { settings: { ...DEFAULT_SETTINGS }, app: {}, applySettings() {}, async saveSettings() { state.writes.push({ ...this.settings }); if (state.fail) throw new Error("disk full"); } };
+	const render = () => { globalThis.draftHarness.index = 0; return SettingsView({ plugin }); };
+	let tree = render();
+	assert.equal(tree.props.children[0].props.children[0].type, "button");
+	tree.props.children[0].props.children[2].props.onClick(); // Bracket tab.
+	tree = render();
+	const oldProps = tree.props.children[2].props.children.props;
+	const originalError = console.error;
+	console.error = () => {};
+	try {
+		oldProps.reset();
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.deepEqual(state.notices, ["settings.saveFailed"]);
+		assert.equal(plugin.settings.bracketMatchColor, DEFAULT_SETTINGS.bracketMatchColor);
+		// Old component unmount and even an already queued timer cannot undo reset.
+		assert.equal(await oldProps.update({ bracketMatchColor: "#123456" }), false);
+		assert.equal(state.writes.length, 1);
+		tree = render();
+		assert.equal(tree.props.children[2].key, "1");
+		state.fail = false;
+		await tree.props.children[1].props.children[1].props.onClick();
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(state.writes.length, 2);
+		tree = render();
+		assert.equal(tree.props.children[1], false);
+		tree.props.children[2].props.children.props.reset();
+		await new Promise((resolve) => setImmediate(resolve));
+		assert.equal(state.notices.at(-1), "settings.reset.done");
+	} finally { console.error = originalError; }
+});
 test("input drafts debounce, preserve zero, flush on blur/unmount, and reject invalid values", (t) => {
 	t.mock.timers.enable({ apis: ["setTimeout"] });
 	const state = { slots: [], index: 0 };

@@ -28,18 +28,29 @@ export async function captureTarget(app: App, path: string, start: number, langu
 	return { file, snapshot: captureBlock(document, start, language) };
 }
 
-export async function writeTarget(app: App, target: BlockTarget, body: string): Promise<void> {
+export async function writeTarget(app: App, target: BlockTarget, body: string, validate: () => void = () => {}): Promise<void> {
+	const check = () => {
+		validate();
+		if (app.vault.getAbstractFileByPath(target.file.path) !== target.file) throw new BlockConflictError();
+	};
+	check();
 	// Prefer the live editor so unsaved edits are respected and the operation is undoable.
 	const editor = fileEditor(app, target.file);
 	if (editor) {
 		const document = editor.getValue();
 		const block = locateBlock(document, target.snapshot);
+		check();
 		editor.replaceRange(
 			replacementLines(block, body).join("\n"),
 			{ line: block.start, ch: 0 },
 			{ line: block.end, ch: editor.getLine(block.end).length }
 		);
 	} else {
-		await app.vault.process(target.file, (document) => replaceBlock(document, target.snapshot, body));
+		await app.vault.process(target.file, (document) => {
+			check();
+			// A source editor opened while the host queued this operation may have unsaved edits.
+			if (fileEditor(app, target.file)) throw new BlockConflictError();
+			return replaceBlock(document, target.snapshot, body);
+		});
 	}
 }

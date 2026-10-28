@@ -33,23 +33,21 @@ export function SettingHeading({ name, desc, children }: SettingItemProps) {
 export function Toggle({
 	value,
 	onChange,
+	label,
 }: {
 	value: boolean;
 	onChange: (value: boolean) => void;
+	label: string;
 }) {
 	return (
-		<div
+		<button
+			type="button"
+			role="switch"
+			aria-checked={value}
+			aria-label={label}
 			className={"checkbox-container" + (value ? " is-enabled" : "")}
 			onClick={() => onChange(!value)}
-		>
-			<input
-				type="checkbox"
-				checked={value}
-				onChange={() => {}}
-				tabIndex={-1}
-				style={{ pointerEvents: "none" }}
-			/>
-		</div>
+		/>
 	);
 }
 

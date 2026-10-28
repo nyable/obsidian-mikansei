@@ -133,7 +133,8 @@ const zhCN = {
 		},
 	},
 	settings: {
-		saveFailed: "设置保存失败，请重试。",
+		saveFailed: "设置已在当前会话生效，但保存失败。请在重启前重试。",
+		retrySave: "重试保存",
 		general: {
 			heading: "通用",
 			language: {

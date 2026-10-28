@@ -34,8 +34,11 @@ export async function unlockContent(source: string, password: string) {
 	try {
 		const result = await decryptAesGcm(source.replace(/\s/g, ""), password);
 		return { ...result, remark: bundle.remark, language: bundle.language ?? "text" };
-	} catch {
-		throw new CryptoAuthenticationError();
+	} catch (error) {
+		// Web Crypto reports GCM authentication failure as OperationError. Missing
+		// capabilities, unsupported algorithms and programming errors are not passwords.
+		if (error instanceof DOMException && error.name === "OperationError") throw new CryptoAuthenticationError();
+		throw error;
 	}
 }
 

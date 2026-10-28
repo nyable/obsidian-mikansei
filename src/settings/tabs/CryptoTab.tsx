@@ -22,7 +22,7 @@ export function CryptoTab({ settings, update, reset }: TabProps) {
 
 	return <>
 		<SettingHeading name={t("settings.crypto.heading")} desc={t("settings.crypto.desc")}>
-			<Toggle value={settings.cryptoBlockEnabled} onChange={(value) => update({ cryptoBlockEnabled: value })} />
+			<Toggle label={t("settings.crypto.heading")} value={settings.cryptoBlockEnabled} onChange={(value) => update({ cryptoBlockEnabled: value })} />
 		</SettingHeading>
 		{settings.cryptoBlockEnabled && <>
 			<SettingItem name={t("settings.cryptoLanguage.name")} desc={t("settings.cryptoLanguage.desc")}>

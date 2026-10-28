@@ -1,11 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { CSSProperties } from "react";
 import { HexAlphaColorPicker, HexColorInput } from "react-colorful";
+import { useDebouncedDraft } from "./useDebouncedDraft";
 
 const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i;
-
-/** 拖动取色时的提交防抖时间（毫秒）。 */
-const COMMIT_DELAY = 250;
 
 /** 把任意合法的 hex 归一化为 8 位 #rrggbbaa。 */
 function normalizeHex(value: string): string {
@@ -37,58 +35,8 @@ export function ColorInput({
 	ariaLabel,
 }: ColorInputProps) {
 	const [open, setOpen] = useState(false);
-	// 本地草稿：拖动期间只更新这里，避免每帧都写回设置/落盘
-	const [draft, setDraft] = useState(value);
-
-	const draftRef = useRef(draft);
-	const committedRef = useRef(value);
-	const onChangeRef = useRef(onChange);
-	const timerRef = useRef<number | null>(null);
-
-	draftRef.current = draft;
-	onChangeRef.current = onChange;
-
-	// 面板关闭时与外部值同步（例如「恢复默认」）
-	useEffect(() => {
-		if (!open) {
-			setDraft(value);
-			committedRef.current = value;
-		}
-	}, [value, open]);
-
-	// 卸载时把未提交的草稿提交掉
-	useEffect(() => {
-		return () => {
-			if (timerRef.current !== null) {
-				window.clearTimeout(timerRef.current);
-				timerRef.current = null;
-				if (draftRef.current !== committedRef.current) {
-					committedRef.current = draftRef.current;
-					onChangeRef.current(draftRef.current);
-				}
-			}
-		};
-	}, []);
-
-	/** 立即提交当前草稿（如有变化）。 */
-	const commit = () => {
-		if (timerRef.current !== null) {
-			window.clearTimeout(timerRef.current);
-			timerRef.current = null;
-		}
-		if (draftRef.current !== committedRef.current) {
-			committedRef.current = draftRef.current;
-			onChangeRef.current(draftRef.current);
-		}
-	};
-
-	const handleChange = (next: string) => {
-		setDraft(next);
-		if (timerRef.current !== null) {
-			window.clearTimeout(timerRef.current);
-		}
-		timerRef.current = window.setTimeout(commit, COMMIT_DELAY);
-	};
+	const { draft, change: handleChange, flush: commit } = useDebouncedDraft(value,
+		(next) => HEX_RE.test(next) ? next : null, onChange);
 
 	const toggleOpen = () => {
 		if (open) {
@@ -125,7 +73,8 @@ export function ColorInput({
 				<div className="mikansei-color-panel">
 					<HexAlphaColorPicker color={color} onChange={handleChange} />
 					<HexColorInput
-						className="mikansei-color-hex"
+					className="mikansei-color-hex"
+					onBlur={commit}
 						color={color}
 						alpha
 						prefixed

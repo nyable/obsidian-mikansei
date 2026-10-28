@@ -68,6 +68,39 @@ test("CRLF notes retain their newline convention", () => {
 	assert.equal(replaceBlock(original, captureBlock(original, 1, "nya"), "a\nb\n"), doc("a\nb\n").replaceAll("\n", "\r\n"));
 });
 
+test("LF and CRLF encryption/decryption roundtrips preserve empty lines and structural terminators", async () => {
+	for (const newline of ["\n", "\r\n"]) {
+		for (const body of ["", "hello", "hello\nworld", "hello\n\n"]) {
+			const original = doc(body).replaceAll("\n", newline);
+			const snapshot = captureBlock(original, 1, "nya");
+			assert.equal(snapshot.block.body, body.replaceAll("\n", newline));
+			const ciphertext = await encryptContent(snapshot.block.body, "test", "", "text");
+			const encrypted = replaceBlock(original, snapshot, ciphertext);
+			const captured = captureBlock(encrypted, 1, "nya");
+			const plain = await unlockContent(captured.block.body, "test");
+			assert.equal(replaceBlock(encrypted, captured, plain.text), original);
+		}
+	}
+});
+
+test("literal CR in historical plaintext is not trimmed on decrypt or replacement", async () => {
+	const text = "old data\r";
+	const cipher = await encryptContent(text, "test", "", "text");
+	assert.equal((await unlockContent(cipher, "test")).text, text);
+	const original = doc("cipher").replaceAll("\n", "\r\n");
+	const result = replaceBlock(original, captureBlock(original, 1, "nya"), text);
+	assert.ok(result.includes("old data\r\r\n"));
+	assert.equal(parseFencedBlocks(result)[0].body, text);
+});
+
+test("large documents locate the captured block without confusing similar candidates", () => {
+	const original = Array.from({ length: 3000 }, (_, i) => `\`\`\`nya\n${i}${"x".repeat(200)}\n\`\`\``).join("\n");
+	const snapshot = captureBlock(original, 4500, "nya");
+	const moved = "new header\n" + original;
+	assert.equal(locateBlock(moved, snapshot).start, 4501);
+	assert.equal(parseFencedBlocks(replaceBlock(moved, snapshot, "updated"))[1500].body, "updated");
+});
+
 test("tilde fences, long fences and empty content are handled", () => {
 	for (const marker of ["~~~", "`````"]) {
 		const original = doc("", marker);
@@ -114,6 +147,20 @@ test("authentication failures and format failures have distinct error messages",
 	await assert.rejects(unlockContent("not a bundle", "wrong"), CryptoFormatError);
 	assert.equal(cryptoErrorMessage(new BlockConflictError()), "crypto.ui.conflict");
 	assert.equal(cryptoErrorMessage(new CryptoAuthenticationError()), "crypto.notice.decryptFailedWrongPassword");
+});
+
+test("missing Web Crypto and unsupported algorithms are not mislabeled as a wrong password", async () => {
+	const encrypted = await encryptContent("secret", "correct", "", "text");
+	const original = window.crypto;
+	try {
+		window.crypto = {};
+		await assert.rejects(unlockContent(encrypted, "correct"), (error) => {
+			assert.equal(cryptoErrorMessage(error), "crypto.ui.operationFailed");
+			return !(error instanceof CryptoAuthenticationError);
+		});
+		window.crypto = { subtle: { importKey: async () => { throw new DOMException("unavailable", "NotSupportedError"); } } };
+		await assert.rejects(unlockContent(encrypted, "correct"), { name: "NotSupportedError" });
+	} finally { window.crypto = original; }
 });
 
 test("malformed crypto fields and excessive KDF work are rejected before decrypting", async () => {
@@ -230,6 +277,21 @@ test("divergent editor buffers are refused instead of choosing an arbitrary pane
 	await assert.rejects(captureTarget(app, "note.md", 1, "nya"), BlockConflictError);
 });
 
+test("queued vault writes recheck cancellation, file identity and newly opened editors", async () => {
+	for (const failure of ["cancel", "file", "editor"]) {
+		const app = storageApp(doc("secret"), false);
+		const target = await captureTarget(app, "note.md", 1, "nya");
+		let process;
+		app.vault.process = async (file, callback) => { process = callback; };
+		let valid = true;
+		await writeTarget(app, target, "updated", () => { if (!valid) throw new BlockConflictError(); });
+		if (failure === "cancel") valid = false;
+		if (failure === "file") app.vault.getAbstractFileByPath = () => new TFile("note.md");
+		if (failure === "editor") app.leaves.push({ view: new MarkdownView(app.file, { getValue: () => doc("unsaved") }) });
+		assert.throws(() => process(doc("secret")), BlockConflictError);
+	}
+});
+
 const reactDependencies = {
 	"react": import.meta.resolve("react"),
 	"react/jsx-runtime": import.meta.resolve("react/jsx-runtime"),
@@ -292,7 +354,25 @@ test("plaintext UI escapes markup and supports encryption and copy", () => {
 });
 
 const { previewMarkdown, renderCryptoPreview } = await import(previewUrl);
-const { Component, renderCalls } = await import(previewObsidianUrl);
+const { Component, renderCalls, MarkdownRenderer } = await import(previewObsidianUrl);
+
+test("older hosts render with renderMarkdown while retaining cleanup ownership", async () => {
+	const modern = MarkdownRenderer.render;
+	delete MarkdownRenderer.render;
+	let args;
+	MarkdownRenderer.renderMarkdown = async (...values) => { args = values; };
+	try {
+		const parent = new Component(); parent.load();
+		const { host, container } = previewContainer();
+		const preview = renderCryptoPreview({}, parent, container, "old.md", "secret", "text");
+		await preview.finished;
+		assert.equal(args[0], "```text\nsecret\n```");
+		assert.equal(args[1], host);
+		assert.equal(args[2], "old.md");
+		preview.dispose();
+		assert.equal(args[3].unloads, 1);
+	} finally { MarkdownRenderer.render = modern; delete MarkdownRenderer.renderMarkdown; }
+});
 
 function previewContainer() {
 	const host = { removed: false, content: "", remove() { this.removed = true; }, replaceChildren() { this.content = ""; } };

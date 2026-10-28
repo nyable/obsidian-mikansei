@@ -138,7 +138,8 @@ const en = {
 		},
 	},
 	settings: {
-		saveFailed: "Could not save settings. Please try again.",
+		saveFailed: "Settings are applied for this session but could not be saved. Retry before restarting.",
+		retrySave: "Retry saving",
 		general: {
 			heading: "General",
 			language: {

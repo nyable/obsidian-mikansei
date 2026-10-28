@@ -16,7 +16,7 @@ test("release refuses missing or mismatched tags", () => {
 	}
 });
 
-test("release refuses inconsistent manifests, version mappings and stale assets", () => {
+test("release refuses inconsistent manifests, version mappings and stale built manifests", () => {
 	for (const override of [
 		{ manifest: { ...manifest, version: "1.0.0" } },
 		{ versions: {} },

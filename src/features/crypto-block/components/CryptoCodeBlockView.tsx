@@ -39,12 +39,16 @@ export function CryptoCodeBlockView({ source, el, ctx, plugin }: CryptoCodeBlock
 	const activity = useRef(Date.now());
 	const previewRef = useRef<HTMLDivElement>(null);
 	const translate = useRef(t);
+	const lifetime = useRef(new AbortController());
+	const identifier = useRef(plugin.settings.cryptoBlockLanguage);
 	translate.current = t;
 
 	useEffect(() => {
 		mounted.current = true;
+		if (lifetime.current.signal.aborted) lifetime.current = new AbortController();
 		return () => {
 			mounted.current = false;
+			lifetime.current.abort();
 			editorRef.current?.dispose();
 			editorRef.current = null;
 			sessionRef.current = null;
@@ -92,7 +96,7 @@ export function CryptoCodeBlockView({ source, el, ctx, plugin }: CryptoCodeBlock
 		active.current = true;
 		setBusy(true);
 		setError("");
-		try { await action(); } catch (failure) {
+		try { validate(); await action(); } catch (failure) {
 			if (mounted.current) setError(cryptoErrorMessage(failure));
 		} finally {
 			active.current = false;
@@ -100,6 +104,15 @@ export function CryptoCodeBlockView({ source, el, ctx, plugin }: CryptoCodeBlock
 			if (mounted.current) setBusy(false);
 		}
 	}
+
+	function validate() {
+		if (!mounted.current || lifetime.current.signal.aborted || !plugin.settings.cryptoBlockEnabled || plugin.settings.cryptoBlockLanguage !== identifier.current) throw new BlockConflictError();
+	}
+	const dialog: typeof openCryptoDialog = (app, options) => {
+		validate();
+		return openCryptoDialog(app, options, lifetime.current.signal);
+	};
+	const write = (captured: BlockTarget, body: string) => { validate(); return writeTarget(plugin.app, captured, body, validate); };
 
 	async function target() {
 		const info = ctx.getSectionInfo(el);
@@ -114,10 +127,11 @@ export function CryptoCodeBlockView({ source, el, ctx, plugin }: CryptoCodeBlock
 	async function unlock() {
 		await perform(async () => {
 			const captured = await target();
-			await openCryptoDialog(plugin.app, {
+			await dialog(plugin.app, {
 				mode: "decrypt", title: t("crypto.ui.unlock"), submitLabel: t("crypto.ui.unlock"),
 				onSubmit: async ({ password }) => {
 					const result = await unlockContent(captured.snapshot.block.body, password);
+					validate();
 					if (!mounted.current) throw new BlockConflictError();
 					const content = { text: result.text, remark: result.remark, language: result.language };
 					sessionRef.current = { ...content, password, target: captured };
@@ -132,14 +146,14 @@ export function CryptoCodeBlockView({ source, el, ctx, plugin }: CryptoCodeBlock
 		await perform(async () => {
 			const captured = await target();
 			if (isEncryptedContent(captured.snapshot.block.body)) throw new BlockConflictError();
-			await openCryptoDialog(plugin.app, {
+			await dialog(plugin.app, {
 				mode: "encrypt", title: t("crypto.dialog.encryptTitle"), submitLabel: t("crypto.dialog.submitEncrypt"),
 				description: t("crypto.ui.encryptHint"),
 				onSubmit: async ({ password, remarks, language }) => {
 					if (!mounted.current) throw new BlockConflictError();
 					const body = await encryptContent(captured.snapshot.block.body, password, remarks, language ?? "text");
 					if (!mounted.current) throw new BlockConflictError();
-					await writeTarget(plugin.app, captured, body);
+					await write(captured, body);
 					new Notice(t("crypto.notice.encryptSuccess"));
 				},
 			});
@@ -156,7 +170,7 @@ export function CryptoCodeBlockView({ source, el, ctx, plugin }: CryptoCodeBlock
 				if (!mounted.current || sessionRef.current !== session) throw new BlockConflictError();
 				const body = await encryptContent(draft.text, session.password, draft.remark, draft.language);
 				if (!mounted.current || sessionRef.current !== session) throw new BlockConflictError();
-				await writeTarget(plugin.app, session.target, body);
+				await write(session.target, body);
 				if (mounted.current) clearSession();
 				new Notice(t("crypto.ui.saved"));
 			});
@@ -173,7 +187,7 @@ export function CryptoCodeBlockView({ source, el, ctx, plugin }: CryptoCodeBlock
 		await perform(async () => {
 			const session = sessionRef.current;
 			if (!session) return;
-			await openCryptoDialog(plugin.app, {
+			await dialog(plugin.app, {
 				mode: "change", title: t("crypto.ui.changePassword"), submitLabel: t("crypto.ui.changePassword"),
 				description: t("crypto.ui.passwordHistoryWarning"),
 				onSubmit: async ({ password, oldPassword }) => {
@@ -181,7 +195,7 @@ export function CryptoCodeBlockView({ source, el, ctx, plugin }: CryptoCodeBlock
 					const result = await unlockContent(session.target.snapshot.block.body, oldPassword ?? "");
 					const body = await encryptContent(result.text, password, result.remark, result.language);
 					if (!mounted.current || sessionRef.current !== session) throw new BlockConflictError();
-					await writeTarget(plugin.app, session.target, body);
+					await write(session.target, body);
 					if (mounted.current) clearSession();
 					new Notice(t("crypto.ui.passwordChanged"));
 				},
@@ -194,7 +208,7 @@ export function CryptoCodeBlockView({ source, el, ctx, plugin }: CryptoCodeBlock
 			const session = sessionRef.current;
 			const finish = async (captured: BlockTarget, text: string) => {
 				if (!mounted.current) throw new BlockConflictError();
-				await writeTarget(plugin.app, captured, text);
+				await write(captured, text);
 				if (mounted.current) clearSession();
 				new Notice(t("crypto.notice.decryptToFileSuccess"));
 			};
@@ -202,11 +216,11 @@ export function CryptoCodeBlockView({ source, el, ctx, plugin }: CryptoCodeBlock
 				if (!await confirmModal(plugin.app, {
 					title: t("crypto.ui.decryptPermanent"), message: t("crypto.ui.permanentWarning"),
 					confirmText: t("crypto.ui.decryptPermanent"), cancelText: t("crypto.ui.cancel"),
-				})) return;
+				}, lifetime.current.signal)) return;
 				await finish(session.target, session.text);
 			} else {
 				const captured = await target();
-				await openCryptoDialog(plugin.app, {
+				await dialog(plugin.app, {
 					mode: "decrypt", title: t("crypto.ui.decryptPermanent"), submitLabel: t("crypto.ui.decryptPermanent"),
 					description: t("crypto.ui.permanentWarning"),
 					onSubmit: async ({ password }) => {

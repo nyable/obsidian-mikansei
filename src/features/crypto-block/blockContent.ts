@@ -8,6 +8,7 @@ export interface FencedBlock {
 	language: string;
 	indent: string;
 	marker: string;
+	raw: string;
 }
 
 export interface BlockSnapshot {
@@ -37,7 +38,10 @@ export function parseFencedBlocks(document: string): FencedBlock[] {
 		if (end === lines.length) break;
 		blocks.push({
 			start, end, opening: lines[start], closing: lines[end],
-			body: lines.slice(start + 1, end).join("\n"), language, indent, marker,
+			// The CR immediately before the closing fence belongs to its CRLF separator,
+			// not the plaintext. Keep internal CRLFs and any additional literal CR intact.
+			body: lines.slice(start + 1, end).join("\n").replace(/\r$/, ""), language, indent, marker,
+			raw: lines.slice(start, end + 1).join("\n"),
 		});
 		start = end;
 	}
@@ -52,19 +56,15 @@ export function captureBlock(document: string, start: number, language: string):
 	return { document, block };
 }
 
-function rawBlock(document: string, block: FencedBlock): string {
-	return document.split("\n").slice(block.start, block.end + 1).join("\n");
-}
-
 export function locateBlock(document: string, snapshot: BlockSnapshot): FencedBlock {
-	const original = rawBlock(snapshot.document, snapshot.block);
-	const candidates = parseFencedBlocks(document).filter((block) => rawBlock(document, block) === original);
+	const original = snapshot.block.raw;
+	const candidates = parseFencedBlocks(document).filter((block) => block.raw === original);
 	if (document === snapshot.document) {
 		const exact = candidates.find((block) => block.start === snapshot.block.start);
 		if (exact) return exact;
 	} else {
 		const originalCount = parseFencedBlocks(snapshot.document)
-			.filter((block) => rawBlock(snapshot.document, block) === original).length;
+			.filter((block) => block.raw === original).length;
 		if (originalCount === 1 && candidates.length === 1) return candidates[0];
 	}
 	throw new BlockConflictError();

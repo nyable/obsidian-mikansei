@@ -6,7 +6,7 @@ import { enhanceLinkPaste } from "./features/link-paste/linkPasteEnhancer";
 import { codeBlockCrypto } from "./features/crypto-block/codeBlockProcessor";
 import { registerCryptoCommands } from "./features/crypto-block/cryptoCommands";
 import { MikanseiSettingTab } from "./settings/SettingsTab";
-import { DEFAULT_SETTINGS, type PluginSettings } from "./settings/types";
+import { parseSettings, type PluginSettings } from "./settings/types";
 import { initI18n } from "./i18n";
 import "./styles/index.scss";
 
@@ -16,6 +16,7 @@ export default class Mikansei extends Plugin {
 	private appliedSettings: PluginSettings | null = null;
 	private disposeCrypto: (() => void) | null = null;
 	private settingsWrites: Promise<void> = Promise.resolve();
+	private cancelCryptoCommands: (() => void) | undefined;
 
 	async onload() {
 		await this.loadSettings();
@@ -24,7 +25,7 @@ export default class Mikansei extends Plugin {
 		this.registerEditorExtension(this.editorExtensions);
 		registerBracketCommands(this);
 		enhanceLinkPaste(this);
-		registerCryptoCommands(this);
+		this.cancelCryptoCommands = registerCryptoCommands(this);
 		this.register(() => { this.disposeCrypto?.(); this.disposeCrypto = null; clearBracketStyles(); });
 		this.applySettings();
 	}
@@ -42,6 +43,7 @@ export default class Mikansei extends Plugin {
 			if (this.settings.bracketMatchingEnabled) this.editorExtensions.push(highlightBracket(this));
 		}
 		if (cryptoChanged) {
+			this.cancelCryptoCommands?.();
 			this.disposeCrypto?.();
 			this.disposeCrypto = this.settings.cryptoBlockEnabled ? codeBlockCrypto(this) : null;
 		}
@@ -55,20 +57,7 @@ export default class Mikansei extends Plugin {
 	}
 
 	async loadSettings() {
-		this.settings = Object.assign(
-			{},
-			DEFAULT_SETTINGS,
-			await this.loadData()
-		);
-		if (!Number.isInteger(this.settings.cryptoAutoLockMinutes) || this.settings.cryptoAutoLockMinutes < 0 || this.settings.cryptoAutoLockMinutes > 120) {
-			this.settings.cryptoAutoLockMinutes = DEFAULT_SETTINGS.cryptoAutoLockMinutes;
-		}
-		if (!Number.isInteger(this.settings.fetchTitleTimeout) || this.settings.fetchTitleTimeout < 0 || this.settings.fetchTitleTimeout > 10000) {
-			this.settings.fetchTitleTimeout = DEFAULT_SETTINGS.fetchTitleTimeout;
-		}
-		if (typeof this.settings.cryptoBlockLanguage !== "string" || !/^[\w-]{1,40}$/.test(this.settings.cryptoBlockLanguage)) {
-			this.settings.cryptoBlockLanguage = DEFAULT_SETTINGS.cryptoBlockLanguage;
-		}
+		this.settings = parseSettings(await this.loadData());
 	}
 
 	async saveSettings() {

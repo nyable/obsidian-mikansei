@@ -25,6 +25,7 @@ export function LinkPasteTab({ settings, update, reset }: TabProps) {
 				desc={t("settings.linkPaste.desc")}
 			>
 				<Toggle
+					label={t("settings.linkPaste.heading")}
 					value={settings.linkPasteEnhancer}
 					onChange={(v) => update({ linkPasteEnhancer: v })}
 				/>
@@ -37,6 +38,7 @@ export function LinkPasteTab({ settings, update, reset }: TabProps) {
 						desc={t("settings.fetchTitle.desc")}
 					>
 						<Toggle
+							label={t("settings.fetchTitle.name")}
 							value={settings.fetchTitle}
 							onChange={(v) => update({ fetchTitle: v })}
 						/>

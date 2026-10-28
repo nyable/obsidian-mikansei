@@ -9,13 +9,13 @@ import {
 import type { TabProps } from "../tabProps";
 import type { LanguageSetting } from "../types";
 
-export function GeneralTab({ settings, update, reset }: TabProps) {
+export function GeneralTab({ plugin, settings, update, reset }: TabProps) {
 	const { t } = useTranslation();
 
 	const handleLanguageChange = async (value: LanguageSetting) => {
-		update({ language: value });
+		const saving = update({ language: value });
 		await i18n.changeLanguage(resolveLocale(value));
-		new Notice(i18n.t("settings.languageChanged"));
+		if (await saving && plugin.settings.language === value) new Notice(i18n.t("settings.languageChanged"));
 	};
 
 	return (

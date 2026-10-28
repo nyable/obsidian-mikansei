@@ -35,8 +35,12 @@ export function useDebouncedDraft(value: string, validate: (draft: string) => st
 	useEffect(() => () => {
 		if (timer.current !== null) {
 			clearTimeout(timer.current);
+			timer.current = null;
 			const next = validation.current(draftRef.current);
-			if (next !== null && next !== committed.current) commitHandler.current(next);
+			if (next !== null && next !== committed.current) {
+				committed.current = next;
+				commitHandler.current(next);
+			}
 		}
 	}, []);
 

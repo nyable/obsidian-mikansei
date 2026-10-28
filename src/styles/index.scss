@@ -70,6 +70,10 @@ body.nya-bracket-style-text {
 	}
 
 	.mikansei-tab {
+		background: transparent;
+		box-shadow: none;
+		border: 0;
+		border-radius: 0;
 		padding: 6px 12px;
 		cursor: pointer;
 		user-select: none;
@@ -87,6 +91,12 @@ body.nya-bracket-style-text {
 			color: var(--text-normal);
 			border-bottom-color: var(--interactive-accent);
 		}
+	}
+
+	button.checkbox-container {
+		padding: 0;
+		border: 0;
+		box-shadow: none;
 	}
 }
 

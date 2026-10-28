@@ -4,6 +4,6 @@ import type { PluginSettings } from "./types";
 export interface TabProps {
 	plugin: Mikansei;
 	settings: PluginSettings;
-	update: (patch: Partial<PluginSettings>) => void;
+	update: (patch: Partial<PluginSettings>) => Promise<boolean>;
 	reset: () => void;
 }

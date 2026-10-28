@@ -25,7 +25,7 @@ function main() {
 		const stat = statSync(resolve(root, "dist", name));
 		assert.ok(stat.isFile() && stat.size > 0, `Release asset dist/${name} must be a nonempty file.`);
 	}
-	console.log("Release version and all three assets validated.");
+	console.log("Release metadata matches; required assets exist and are nonempty. Source provenance and remote assets are not verified.");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

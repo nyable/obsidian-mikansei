@@ -41,7 +41,13 @@ export function renderCryptoPreview(app: App, parent: Component, container: HTML
 	};
 	const finished = (async () => {
 		try {
-			await MarkdownRenderer.render(app, previewMarkdown(text, language), host, sourcePath, owner);
+			const markdown = previewMarkdown(text, language);
+			if (typeof MarkdownRenderer.render === "function") {
+				await MarkdownRenderer.render(app, markdown, host, sourcePath, owner);
+			} else {
+				// Obsidian 1.1/1.2 expose only the older API. Keep the declared minimum.
+				await MarkdownRenderer.renderMarkdown(markdown, host, sourcePath, owner);
+			}
 		} finally {
 			if (disposed) host.replaceChildren();
 		}

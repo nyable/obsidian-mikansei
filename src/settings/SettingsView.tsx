@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Notice } from "obsidian";
 import type Mikansei from "src/main";
@@ -50,45 +50,63 @@ export function SettingsView({ plugin }: SettingsViewProps) {
 		...plugin.settings,
 	}));
 	const [activeTab, setActiveTab] = useState<TabId>(lastTab);
+	const [revision, setRevision] = useState(0);
+	const generation = useRef(0);
+	const [saveFailed, setSaveFailed] = useState(false);
+	const [resetting, setResetting] = useState(false);
+	const resetPending = useRef(false);
 
 	const selectTab = (id: TabId) => {
 		lastTab = id;
 		setActiveTab(id);
 	};
 
-	const update = (patch: Partial<PluginSettings>) => {
+	const update = async (patch: Partial<PluginSettings>, expected = revision): Promise<boolean> => {
+		// Reset invalidates callbacks from old drafts before their unmount flush runs.
+		if (generation.current !== expected) return false;
 		// Draft flushes on tab unmount must merge with the latest committed settings.
 		const next = { ...plugin.settings, ...patch };
 		setSettings(next);
 		Object.assign(plugin.settings, next);
 		plugin.applySettings();
-		void plugin.saveSettings().catch((error: unknown) => {
+		try {
+			await plugin.saveSettings();
+			setSaveFailed(false);
+			return true;
+		} catch (error: unknown) {
 			console.error("Mikansei: settings save failed", error);
+			setSaveFailed(true);
 			new Notice(i18n.t("settings.saveFailed"));
-		});
+			return false;
+		}
 	};
 
 	const resetTab = async () => {
-		const keys = TAB_KEYS[activeTab];
-		const ok = await confirmModal(plugin.app, {
-			title: i18n.t("settings.reset.confirmTitle"),
-			message: i18n.t("settings.reset.confirmMessage"),
-			confirmText: i18n.t("settings.reset.confirm"),
-			cancelText: i18n.t("settings.reset.cancel"),
-		});
-		if (!ok) return;
+		if (resetPending.current) return;
+		resetPending.current = true;
+		setResetting(true);
+		try {
+			const keys = TAB_KEYS[activeTab];
+			const ok = await confirmModal(plugin.app, {
+				title: i18n.t("settings.reset.confirmTitle"),
+				message: i18n.t("settings.reset.confirmMessage"),
+				confirmText: i18n.t("settings.reset.confirm"),
+				cancelText: i18n.t("settings.reset.cancel"),
+			});
+			if (!ok) return;
 
-		const patch = Object.fromEntries(
-			keys.map((key) => [key, DEFAULT_SETTINGS[key]])
-		) as Partial<PluginSettings>;
-		update(patch);
-
-		if (keys.includes("language")) {
-			await i18n.changeLanguage(
-				resolveLocale(DEFAULT_SETTINGS.language)
-			);
+			const patch = Object.fromEntries(
+				keys.map((key) => [key, DEFAULT_SETTINGS[key]])
+			) as Partial<PluginSettings>;
+			const nextRevision = ++generation.current;
+			setRevision(nextRevision);
+			const saving = update(patch, nextRevision);
+			if (keys.includes("language")) await i18n.changeLanguage(resolveLocale(plugin.settings.language));
+			if (await saving) new Notice(i18n.t("settings.reset.done"));
+		} finally {
+			resetPending.current = false;
+			setResetting(false);
 		}
-		new Notice(i18n.t("settings.reset.done"));
 	};
 
 	const tabProps: TabProps = {
@@ -121,21 +139,26 @@ export function SettingsView({ plugin }: SettingsViewProps) {
 		<div className="mikansei-settings">
 			<div className="mikansei-tabs">
 				{TABS.map((tab) => (
-					<div
+					<button
+						type="button"
 						key={tab.id}
 						className={
 							"mikansei-tab" +
 							(activeTab === tab.id ? " is-active" : "")
 						}
-						role="button"
-						tabIndex={0}
+						aria-pressed={activeTab === tab.id}
+						disabled={resetting}
 						onClick={() => selectTab(tab.id)}
 					>
 						{t(tab.label)}
-					</div>
+					</button>
 				))}
 			</div>
-			<div className="mikansei-tab-content">{renderTab()}</div>
+			{saveFailed && <div role="alert">
+				{t("settings.saveFailed")}
+				<button type="button" onClick={() => void update({})}>{t("settings.retrySave")}</button>
+			</div>}
+			<div key={revision} className="mikansei-tab-content">{renderTab()}</div>
 		</div>
 	);
 }
